@@ -23,6 +23,11 @@ CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
 UPDATE_AVAILABLE=false
 VERSION="1.1.0"
+ADDITIONAL_BACKUPS_ENABLED=false
+ADDITIONAL_PATHS=""
+ADDITIONAL_DB_CONTAINER=""
+ADDITIONAL_DB_USER=""
+ADDITIONAL_DB_NAME=""
 
 if [[ -t 0 ]]; then
     RED=$'\e[31m'
@@ -129,6 +134,11 @@ GD_FOLDER_ID="$GD_FOLDER_ID"
 CRON_TIMES="$CRON_TIMES"
 REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 TG_MESSAGE_THREAD_ID="$TG_MESSAGE_THREAD_ID"
+ADDITIONAL_BACKUPS_ENABLED="$ADDITIONAL_BACKUPS_ENABLED"
+ADDITIONAL_PATHS="$ADDITIONAL_PATHS"
+ADDITIONAL_DB_CONTAINER="$ADDITIONAL_DB_CONTAINER"
+ADDITIONAL_DB_USER="$ADDITIONAL_DB_USER"
+ADDITIONAL_DB_NAME="$ADDITIONAL_DB_NAME"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
     print_message "SUCCESS" "Конфигурация сохранена."
@@ -146,8 +156,14 @@ load_or_create_config() {
         CRON_TIMES=${CRON_TIMES:-}
         REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         TG_MESSAGE_THREAD_ID=${TG_MESSAGE_THREAD_ID:-}
-        
+        ADDITIONAL_BACKUPS_ENABLED=${ADDITIONAL_BACKUPS_ENABLED:-false}
+        ADDITIONAL_PATHS=${ADDITIONAL_PATHS:-}
+        ADDITIONAL_DB_CONTAINER=${ADDITIONAL_DB_CONTAINER:-}
+        ADDITIONAL_DB_USER=${ADDITIONAL_DB_USER:-}
+        ADDITIONAL_DB_NAME=${ADDITIONAL_DB_NAME:-}
+
         local config_updated=false
+        config_updated=true
 
         if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
             print_message "WARN" "В файле конфигурации отсутствуют необходимые переменные для Telegram."
@@ -634,7 +650,11 @@ create_backup() {
     find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
     print_message "SUCCESS" "Политика хранения применена. Старые бэкапы удалены."
     echo ""
-    
+
+    if [[ "$ADDITIONAL_BACKUPS_ENABLED" == true ]]; then
+        create_additional_backup
+    fi
+
     {
         check_update_status >/dev/null 2>&1
         if [[ "$UPDATE_AVAILABLE" == true ]]; then
@@ -649,6 +669,90 @@ create_backup() {
             fi
         fi
     } &
+}
+
+create_additional_backup() {
+    print_message "INFO" "Создание дополнительного бэкапа..."
+    local ADD_DIR="$BACKUP_DIR/additional"
+    local ADD_DB_FILE="additional_dump_${TIMESTAMP}.sql.gz"
+    local ADD_FINAL_FILE="additional_backup_${TIMESTAMP}.tar.gz"
+
+    mkdir -p "$ADD_DIR" || { print_message "ERROR" "Не удалось создать каталог дополнительных бэкапов."; return 1; }
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    local have_data=false
+
+    if [[ -n "$ADDITIONAL_DB_CONTAINER" && -n "$ADDITIONAL_DB_USER" && -n "$ADDITIONAL_DB_NAME" ]]; then
+        print_message "INFO" "Создание дампа дополнительной БД..."
+        if docker inspect "$ADDITIONAL_DB_CONTAINER" > /dev/null 2>&1 && docker container inspect -f '{{.State.Running}}' "$ADDITIONAL_DB_CONTAINER" 2>/dev/null | grep -q "true"; then
+            if docker exec -t "$ADDITIONAL_DB_CONTAINER" pg_dump -U "$ADDITIONAL_DB_USER" "$ADDITIONAL_DB_NAME" | gzip -9 > "$ADD_DIR/$ADD_DB_FILE"; then
+                cp "$ADD_DIR/$ADD_DB_FILE" "$tmp_dir/"
+                have_data=true
+                print_message "SUCCESS" "Дамп дополнительной БД создан."
+            else
+                print_message "ERROR" "Не удалось создать дамп дополнительной БД."
+            fi
+        else
+            print_message "ERROR" "Контейнер дополнительной БД не найден или не запущен."
+        fi
+    fi
+
+    if [[ -n "$ADDITIONAL_PATHS" ]]; then
+        print_message "INFO" "Добавление файловых путей в дополнительный бэкап..."
+        for p in $ADDITIONAL_PATHS; do
+            if [[ -e "$p" ]]; then
+                cp -r "$p" "$tmp_dir/" 2>/dev/null || print_message "WARN" "Не удалось добавить путь $p"
+                have_data=true
+            else
+                print_message "WARN" "Путь $p не найден. Пропуск."
+            fi
+        done
+    fi
+
+    if [[ "$have_data" == true ]]; then
+        if tar -czf "$ADD_DIR/$ADD_FINAL_FILE" -C "$tmp_dir" .; then
+            print_message "SUCCESS" "Дополнительный архив создан: ${BOLD}${ADD_DIR}/${ADD_FINAL_FILE}${RESET}"
+            rm -rf "$tmp_dir"
+            rm -f "$ADD_DIR/$ADD_DB_FILE"
+
+            print_message "INFO" "Отправка дополнительного бэкапа (${UPLOAD_METHOD})..."
+            if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
+                local caption=$'💾 #extra_backup\n📅 *Дата:* '"${DATE}"
+                if send_telegram_document "$ADD_DIR/$ADD_FINAL_FILE" "$caption"; then
+                    print_message "SUCCESS" "Дополнительный бэкап отправлен в Telegram."
+                else
+                    print_message "ERROR" "Не удалось отправить дополнительный бэкап в Telegram."
+                fi
+            elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
+                if send_google_drive_document "$ADD_DIR/$ADD_FINAL_FILE"; then
+                    print_message "SUCCESS" "Дополнительный бэкап отправлен в Google Drive."
+                    send_telegram_message $'💾 #extra_backup\n✅ *Дополнительный бэкап отправлен в Google Drive*\n📅 *Дата:* '"${DATE}" "None"
+                else
+                    print_message "ERROR" "Не удалось отправить дополнительный бэкап в Google Drive."
+                    send_telegram_message "❌ Ошибка: Не удалось отправить дополнительный бэкап в Google Drive." "None"
+                fi
+            else
+                print_message "WARN" "Неизвестный метод отправки: ${BOLD}${UPLOAD_METHOD}${RESET}. Дополнительный бэкап не отправлен."
+                send_telegram_message "❌ Ошибка: Неизвестный метод отправки дополнительного бэкапа: ${BOLD}${UPLOAD_METHOD}${RESET}." "None"
+            fi
+
+            print_message "INFO" "Применение политики хранения для дополнительных бэкапов..."
+            find "$ADD_DIR" -maxdepth 1 -name "additional_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
+            print_message "SUCCESS" "Политика хранения дополнительных бэкапов применена."
+        else
+            print_message "ERROR" "Не удалось создать архив дополнительного бэкапа."
+            rm -rf "$tmp_dir"
+            rm -f "$ADD_DIR/$ADD_DB_FILE"
+            return 1
+        fi
+    else
+        print_message "WARN" "Нет данных для дополнительного бэкапа."
+        rm -rf "$tmp_dir"
+        rm -f "$ADD_DIR/$ADD_DB_FILE"
+    fi
+
+    return 0
 }
 
 setup_auto_send() {
@@ -1287,6 +1391,66 @@ configure_upload_method() {
     echo ""
 }
 
+configure_additional_backups() {
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}Дополнительные бэкапы${RESET}"
+        echo ""
+        if [[ "$ADDITIONAL_BACKUPS_ENABLED" == true ]]; then
+            local status="включены"
+        else
+            local status="выключены"
+        fi
+        print_message "INFO" "Сейчас дополнительные бэкапы ${BOLD}${status}${RESET}"
+        echo ""
+        echo "   1. Переключить дополнительные бэкапы"
+        echo "   2. Указать дополнительные пути"
+        echo "   3. Настроить дополнительную БД"
+        echo "   0. Назад"
+        echo ""
+        read -rp "   ${GREEN}[?]${RESET} Выберите пункт: " extra_choice
+        echo ""
+        case $extra_choice in
+            1)
+                if [[ "$ADDITIONAL_BACKUPS_ENABLED" == true ]]; then
+                    ADDITIONAL_BACKUPS_ENABLED=false
+                else
+                    ADDITIONAL_BACKUPS_ENABLED=true
+                fi
+                save_config
+                if [[ "$ADDITIONAL_BACKUPS_ENABLED" == true ]]; then
+                    print_message "SUCCESS" "Дополнительные бэкапы включены."
+                else
+                    print_message "SUCCESS" "Дополнительные бэкапы выключены."
+                fi
+                ;;
+            2)
+                print_message "INFO" "Текущие пути: ${BOLD}${ADDITIONAL_PATHS:-отсутствуют}${RESET}"
+                read -rp "   Введите пути через пробел: " new_paths
+                ADDITIONAL_PATHS="$new_paths"
+                save_config
+                print_message "SUCCESS" "Пути сохранены."
+                ;;
+            3)
+                print_message "INFO" "Текущие настройки БД: контейнер=${BOLD}${ADDITIONAL_DB_CONTAINER:--}${RESET}, пользователь=${BOLD}${ADDITIONAL_DB_USER:--}${RESET}, база=${BOLD}${ADDITIONAL_DB_NAME:--}${RESET}"
+                read -rp "   Введите имя контейнера (оставьте пустым чтобы очистить): " new_container
+                read -rp "   Введите имя пользователя БД: " new_user
+                read -rp "   Введите имя базы данных: " new_db
+                ADDITIONAL_DB_CONTAINER="$new_container"
+                ADDITIONAL_DB_USER="$new_user"
+                ADDITIONAL_DB_NAME="$new_db"
+                save_config
+                print_message "SUCCESS" "Настройки БД сохранены."
+                ;;
+            0) break ;;
+            *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+        esac
+        echo ""
+        read -rp "Нажмите Enter для продолжения..."
+    done
+    echo ""
+}
+
 configure_settings() {
     while true; do
         clear
@@ -1559,10 +1723,11 @@ main_menu() {
         echo ""
         echo "   3. Настройка автоматической отправки и уведомлений"
         echo "   4. Настройка способа отправки"
-        echo "   5. Изменение конфигурации скрипта"
+        echo "   5. Дополнительные бэкапы"
+        echo "   6. Изменение конфигурации скрипта"
         echo ""
-        echo "   6. Обновление скрипта"
-        echo "   7. Удаление скрипта"
+        echo "   7. Обновление скрипта"
+        echo "   8. Удаление скрипта"
         echo ""
         echo "   0. Выход"
         echo -e "   —  Быстрый запуск: ${BOLD}${GREEN}rw-backup${RESET} доступен из любой точки системы"
@@ -1575,9 +1740,10 @@ main_menu() {
             2) restore_backup ;;
             3) setup_auto_send ;;
             4) configure_upload_method ;;
-            5) configure_settings ;;
-            6) update_script ;;
-            7) remove_script ;;
+            5) configure_additional_backups ;;
+            6) configure_settings ;;
+            7) update_script ;;
+            8) remove_script ;;
             0) echo "Выход..."; exit 0 ;;
             *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ; read -rp "Нажмите Enter для продолжения..." ;;
         esac
