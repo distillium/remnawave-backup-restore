@@ -19,6 +19,8 @@ GD_CLIENT_ID=""
 GD_CLIENT_SECRET=""
 GD_REFRESH_TOKEN=""
 GD_FOLDER_ID=""
+YD_TOKEN=""
+YD_FOLDER_PATH=""
 UPLOAD_METHOD="telegram"
 CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
@@ -646,6 +648,8 @@ GD_CLIENT_ID="$GD_CLIENT_ID"
 GD_CLIENT_SECRET="$GD_CLIENT_SECRET"
 GD_REFRESH_TOKEN="$GD_REFRESH_TOKEN"
 GD_FOLDER_ID="$GD_FOLDER_ID"
+YD_TOKEN="$YD_TOKEN"
+YD_FOLDER_PATH="$YD_FOLDER_PATH"
 CRON_TIMES="$CRON_TIMES"
 REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 TG_MESSAGE_THREAD_ID="$TG_MESSAGE_THREAD_ID"
@@ -1097,6 +1101,46 @@ send_google_drive_document() {
     fi
 }
 
+send_yandex_disk_document() {
+    local file_path="$1"
+    local file_name=$(basename "$file_path")
+
+    if [[ -z "$YD_TOKEN" ]]; then
+        print_message "ERROR" "Токен Яндекс.Диска не настроен."
+        return 1
+    fi
+
+    local upload_path="${YD_FOLDER_PATH:+$YD_FOLDER_PATH/}$file_name"
+    
+    print_message "INFO" "Получение ссылки для загрузки на Яндекс.Диск..."
+    local upload_url_response=$(curl -s -X GET "https://cloud-api.yandex.net/v1/disk/resources/upload?path=$(echo -n "$upload_path" | jq -sRr @uri)&overwrite=true" \
+        -H "Authorization: OAuth $YD_TOKEN")
+    
+    local upload_href=$(echo "$upload_url_response" | jq -r .href 2>/dev/null)
+    local error_message=$(echo "$upload_url_response" | jq -r .message 2>/dev/null)
+    local error_code=$(echo "$upload_url_response" | jq -r .error 2>/dev/null)
+
+    if [[ -z "$upload_href" || "$upload_href" == "null" ]]; then
+        print_message "ERROR" "Не удалось получить ссылку для загрузки. Код: ${error_code:-Unknown}. Сообщение: ${error_message:-Unknown error}."
+        return 1
+    fi
+
+    print_message "INFO" "Загрузка файла на Яндекс.Диск..."
+    local upload_response=$(curl -s -X PUT "$upload_href" \
+        -H "Authorization: OAuth $YD_TOKEN" \
+        --data-binary "@$file_path" \
+        -w "\n%{http_code}")
+    
+    local http_code=$(echo "$upload_response" | tail -n1)
+
+    if [[ "$http_code" -eq 201 || "$http_code" -eq 200 ]]; then
+        return 0
+    else
+        print_message "ERROR" "Ошибка при загрузке на Яндекс.Диск. HTTP код: ${http_code}. Ответ: ${upload_response}"
+        return 1
+    fi
+}
+
 create_backup() {
     print_message "INFO" "Начинаю процесс создания резервной копии..."
     echo ""
@@ -1222,6 +1266,20 @@ create_backup() {
             else
                 echo -e "${RED}❌ Ошибка при отправке бэкапа в Google Drive. Проверьте настройки Google Drive API.${RESET}"
                 send_telegram_message "❌ Ошибка: Не удалось отправить бэкап в Google Drive. Подробности в логах сервера." "None"
+            fi
+        elif [[ "$UPLOAD_METHOD" == "yandex_disk" ]]; then
+            if send_yandex_disk_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
+                print_message "SUCCESS" "Бэкап успешно отправлен на Яндекс.Диск."
+                local tg_success_message=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Бэкап успешно создан и отправлен на Яндекс.Диск*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}${bot_status}"$'\n📁 *БД и директория*\n📏 *Размер:* '"${backup_size}"$'\n📅 *Дата:* '"${DATE}"
+                
+                if send_telegram_message "$tg_success_message"; then
+                    print_message "SUCCESS" "Уведомление об успешной отправке на Яндекс.Диск отправлено в Telegram."
+                else
+                    print_message "ERROR" "Не удалось отправить уведомление в Telegram после загрузки на Яндекс.Диск."
+                fi
+            else
+                echo -e "${RED}❌ Ошибка при отправке бэкапа на Яндекс.Диск. Проверьте настройки Яндекс.Диска API.${RESET}"
+                send_telegram_message "❌ Ошибка: Не удалось отправить бэкап на Яндекс.Диск. Подробности в логах сервера." "None"
             fi
         else
             print_message "WARN" "Неизвестный метод отправки: ${BOLD}${UPLOAD_METHOD}${RESET}. Бэкап не отправлен."
@@ -1931,6 +1989,7 @@ configure_upload_method() {
         echo ""
         echo "   1. Установить способ отправки: Telegram"
         echo "   2. Установить способ отправки: Google Drive"
+        echo "   3. Установить способ отправки: Яндекс.Диск"
         echo ""
         echo "   0. Вернуться в главное меню"
         echo ""
@@ -2020,6 +2079,44 @@ configure_upload_method() {
                     print_message "SUCCESS" "Способ отправки установлен на ${BOLD}Telegram${RESET}."
                 fi
                 ;;
+            3)
+                UPLOAD_METHOD="yandex_disk"
+                print_message "SUCCESS" "Способ отправки установлен на ${BOLD}Яндекс.Диск${RESET}."
+                
+                if [[ -z "$YD_TOKEN" ]]; then
+                    print_message "ACTION" "Пожалуйста, введите OAuth токен для Яндекс.Диска."
+                    echo ""
+                    echo "Для получения токена:"
+                    echo "1. Перейдите на страницу: ${CYAN}https://yandex.ru/dev/disk/poligon${RESET}"
+                    echo "2. Нажмите 'Получить OAuth-токен'"
+                    echo "3. Разрешите доступ к Яндекс.Диску"
+                    echo "4. Скопируйте полученный токен"
+                    echo ""
+                    read -rp "   Введите OAuth токен: " YD_TOKEN
+                    
+                    if [[ -n "$YD_TOKEN" ]]; then
+                        print_message "SUCCESS" "OAuth токен Яндекс.Диска сохранен."
+                        echo ""
+                        echo "Укажите путь к папке на Яндекс.Диске (например: backups/remnawave)"
+                        echo "Оставьте пустым для загрузки в корневую папку."
+                        read -rp "   Путь к папке: " YD_FOLDER_PATH
+                        
+                        if [[ -n "$YD_FOLDER_PATH" ]]; then
+                            YD_FOLDER_PATH="${YD_FOLDER_PATH#/}"
+                            YD_FOLDER_PATH="${YD_FOLDER_PATH%/}"
+                            print_message "INFO" "Путь на Яндекс.Диске: ${BOLD}/${YD_FOLDER_PATH}${RESET}"
+                        else
+                            print_message "INFO" "Файлы будут загружаться в корневую папку Яндекс.Диска."
+                        fi
+                    else
+                        print_message "WARN" "Токен не введен. Способ отправки изменен на ${BOLD}Telegram${RESET}."
+                        UPLOAD_METHOD="telegram"
+                    fi
+                fi
+                
+                save_config
+                print_message "SUCCESS" "Настройки Яндекс.Диска сохранены."
+                ;;
             0) break ;;
             *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
         esac
@@ -2036,8 +2133,9 @@ configure_settings() {
         echo ""
         echo "   1. Настройки Telegram"
         echo "   2. Настройки Google Drive"
-        echo "   3. Имя пользователя БД Remnawave"
-        echo "   4. Путь Remnawave"
+        echo "   3. Настройки Яндекс.Диск"
+        echo "   4. Имя пользователя БД Remnawave"
+        echo "   5. Путь Remnawave"
         echo ""
         echo "   0. Вернуться в главное меню"
         echo ""
@@ -2185,6 +2283,60 @@ configure_settings() {
                 done
                 ;;
             3)
+                while true; do
+                    clear
+                    echo -e "${GREEN}${BOLD}Настройки Яндекс.Диск${RESET}"
+                    echo ""
+                    print_message "INFO" "Текущий OAuth токен: ${BOLD}${YD_TOKEN:0:8}...${RESET}"
+                    print_message "INFO" "Текущий путь к папке: ${BOLD}${YD_FOLDER_PATH:-Корневая папка}${RESET}"
+                    echo ""
+                    echo "   1. Изменить OAuth токен"
+                    echo "   2. Изменить путь к папке"
+                    echo ""
+                    echo "   0. Назад"
+                    echo ""
+                    read -rp "${GREEN}[?]${RESET} Выберите пункт: " yd_choice
+                    echo ""
+
+                    case $yd_choice in
+                        1)
+                            echo "Для получения OAuth токена:"
+                            echo "1. Перейдите на страницу: ${CYAN}https://yandex.ru/dev/disk/poligon${RESET}"
+                            echo "2. Нажмите 'Получить OAuth-токен'"
+                            echo "3. Разрешите доступ к Яндекс.Диску"
+                            echo "4. Скопируйте полученный токен"
+                            echo ""
+                            read -rp "   Введите новый OAuth токен: " NEW_YD_TOKEN
+                            YD_TOKEN="$NEW_YD_TOKEN"
+                            save_config
+                            print_message "SUCCESS" "OAuth токен Яндекс.Диска успешно обновлен."
+                            ;;
+                        2)
+                            echo ""
+                            echo "Укажите путь к папке на Яндекс.Диске (например: backups/remnawave)"
+                            echo "Оставьте пустым для загрузки в корневую папку."
+                            echo ""
+                            read -rp "   Введите новый путь к папке: " NEW_YD_FOLDER_PATH
+                            if [[ -n "$NEW_YD_FOLDER_PATH" ]]; then
+                                NEW_YD_FOLDER_PATH="${NEW_YD_FOLDER_PATH#/}"
+                                NEW_YD_FOLDER_PATH="${NEW_YD_FOLDER_PATH%/}"
+                                YD_FOLDER_PATH="$NEW_YD_FOLDER_PATH"
+                                print_message "INFO" "Путь на Яндекс.Диске: ${BOLD}/${YD_FOLDER_PATH}${RESET}"
+                            else
+                                YD_FOLDER_PATH=""
+                                print_message "INFO" "Файлы будут загружаться в корневую папку Яндекс.Диска."
+                            fi
+                            save_config
+                            print_message "SUCCESS" "Путь к папке Яндекс.Диска успешно обновлен."
+                            ;;
+                        0) break ;;
+                        *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+                    esac
+                    echo ""
+                    read -rp "Нажмите Enter для продолжения..."
+                done
+                ;;
+            4)
                 clear
                 echo -e "${GREEN}${BOLD}Имя пользователя PostgreSQL${RESET}"
                 echo ""
@@ -2197,7 +2349,7 @@ configure_settings() {
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
-            4)
+            5)
                 clear
                 echo -e "${GREEN}${BOLD}Путь Remnawave${RESET}"
                 echo ""
