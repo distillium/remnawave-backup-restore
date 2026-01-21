@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -105,177 +105,143 @@ configure_bot_backup() {
         echo ""
         
         if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            print_message "INFO" "Бэкап бота: ${BOLD}${GREEN}ВКЛЮЧЕН${RESET}"
-            print_message "INFO" "Выбранный бот: ${BOLD}${BOT_BACKUP_SELECTED}${RESET}"
-            print_message "INFO" "Путь к боту: ${BOLD}${BOT_BACKUP_PATH}${RESET}"
+            echo -e "  Бот:      ${BOLD}${GREEN}${BOT_BACKUP_SELECTED}${RESET}"
+            echo -e "  Путь:     ${BOLD}${WHITE}${BOT_BACKUP_PATH}${RESET}"
+            
+            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+                echo -e "  Режим:    ${BOLD}${RED}ТОЛЬКО БОТ${RESET}"
+            else
+                echo -e "  Режим:    ${BOLD}${GREEN}ПАНЕЛЬ + БОТ${RESET}"
+            fi
         else
-            print_message "INFO" "Бэкап бота: ${BOLD}${RED}ВЫКЛЮЧЕН${RESET}"
+            print_message "INFO" "Бэкап бота: ${RED}${BOLD}ВЫКЛЮЧЕН${RESET}"
+            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+                print_message "WARN" "Внимание: Бэкап панели тоже пропущен (ничего не бэкапится!)"
+            else
+                print_message "INFO" "Режим: бэкап только панели Remnawave"
+            fi
         fi
-        
         echo ""
-        echo " 1. Включить и настроить бэкап бота"
-        echo " 2. Выключить бэкап бота"
+        
+        echo " 1. Настроить / Изменить параметры бота"
+        
+        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
+            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+                if [[ "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
+                    echo " 2. Включить бэкап панели обратно (Режим Панель + Бот)"
+                fi
+            else
+                echo " 2. Исключить бэкап панели (Режим Только Бот)"
+            fi
+        fi
+
+        echo " 3. Полностью выключить бэкап бота"
         echo ""
         echo " 0. Вернуться в главное меню"
         echo ""
         
-        read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
-        echo ""
+        read -rp " ${GREEN}[?]${RESET} Выберите пункт: " choice
         
         case $choice in
             1)
                 clear
-                echo -e "${GREEN}${BOLD}Настройка бэкапа Telegram бота${RESET}"
+                echo -e "${GREEN}${BOLD}Выбор бота для бэкапа${RESET}"
                 echo ""
-                print_message "ACTION" "Выберите бота для бэкапа:"
                 echo " 1. Бот от Иисуса (remnawave-telegram-shop)"
                 echo " 2. Бот от Мачки (remnawave-tg-shop)"
-                echo ""
                 echo " 0. Назад"
                 echo ""
                 
                 local bot_choice
-                local selected_bot=""
-                
-                while true; do
-                    read -rp " ${GREEN}[?]${RESET} Выберите бота: " bot_choice
-                    case "$bot_choice" in
-                        1)
-                            selected_bot="Бот от Иисуса"
-                            break
-                            ;;
-                        2)
-                            selected_bot="Бот от Мачки"
-                            break
-                            ;;
-                        0) 
-                            selected_bot=""
-                            break 
-                            ;;
-                        *)
-                            print_message "ERROR" "Неверный ввод."
-                            ;;
-                    esac
-                done
-                
-                if [[ -z "$selected_bot" ]]; then
-                    continue
-                fi
-                
-                BOT_BACKUP_SELECTED="$selected_bot"
+                read -rp " ${GREEN}[?]${RESET} Ваш выбор: " bot_choice
+                case "$bot_choice" in
+                    1) BOT_BACKUP_SELECTED="Бот от Иисуса"; bot_folder="remnawave-telegram-shop" ;;
+                    2) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
+                    0) continue ;;
+                    *) print_message "ERROR" "Неверный ввод"; sleep 1; continue ;;
+                esac
                 
                 echo ""
                 print_message "ACTION" "Выберите путь к директории бота:"
-                if [[ "$BOT_BACKUP_SELECTED" == "Бот от Иисуса" ]]; then
-                    echo " 1. /opt/remnawave-telegram-shop"
-                    echo " 2. /root/remnawave-telegram-shop"
-                    echo " 3. /opt/stacks/remnawave-telegram-shop"
-                else
-                    echo " 1. /opt/remnawave-tg-shop"
-                    echo " 2. /root/remnawave-tg-shop"
-                    echo " 3. /opt/stacks/remnawave-tg-shop"
-                fi
+                echo " 1. /opt/$bot_folder"
+                echo " 2. /root/$bot_folder"
+                echo " 3. /opt/stacks/$bot_folder"
                 echo " 4. Указать свой путь"
                 echo ""
-                echo " 0. Назад"
-                echo ""
-
-                local path_choice
-                while true; do
-                    read -rp " ${GREEN}[?]${RESET} Выберите путь: " path_choice
-                    case "$path_choice" in
-                    1)
-                        if [[ "$BOT_BACKUP_SELECTED" == "Бот от Иисуса" ]]; then
-                            BOT_BACKUP_PATH="/opt/remnawave-telegram-shop"
-                        else
-                            BOT_BACKUP_PATH="/opt/remnawave-tg-shop"
-                        fi
-                        break
-                        ;;
-                    2)
-                        if [[ "$BOT_BACKUP_SELECTED" == "Бот от Иисуса" ]]; then
-                            BOT_BACKUP_PATH="/root/remnawave-telegram-shop"
-                        else
-                            BOT_BACKUP_PATH="/root/remnawave-tg-shop"
-                        fi
-                        break
-                        ;;
-                    3)
-                        if [[ "$BOT_BACKUP_SELECTED" == "Бот от Иисуса" ]]; then
-                            BOT_BACKUP_PATH="/opt/stacks/remnawave-telegram-shop"
-                        else
-                            BOT_BACKUP_PATH="/opt/stacks/remnawave-tg-shop"
-                        fi
-                        break
-                        ;;
-                    4)
-                        echo ""
-                        print_message "INFO" "Введите полный путь к директории бота:"
-                        read -rp " Путь: " custom_bot_path
-        
-                        if [[ -z "$custom_bot_path" ]]; then
-                            print_message "ERROR" "Путь не может быть пустым."
-                            echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
-                            continue
-                        fi
-        
-                        if [[ ! "$custom_bot_path" = /* ]]; then
-                            print_message "ERROR" "Путь должен быть абсолютным (начинаться с /)."
-                            echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
-                            continue
-                        fi
-        
-                        custom_bot_path="${custom_bot_path%/}"
-        
-                        if [[ ! -d "$custom_bot_path" ]]; then
-                            print_message "WARN" "Директория ${BOLD}${custom_bot_path}${RESET} не существует."
-                            read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_bot_path
-                            if [[ ! "$confirm_custom_bot_path" =~ ^[yY]$ ]]; then
-                                echo ""
-                                read -rp "Нажмите Enter, чтобы продолжить..."
-                                continue
-                            fi
-                        fi
-        
-                        BOT_BACKUP_PATH="$custom_bot_path"
-                        print_message "SUCCESS" "Установлен кастомный путь бота: ${BOLD}${BOT_BACKUP_PATH}${RESET}"
-                        break
-                        ;;
-                    0)
-                        continue 2
-                        ;;
-                    *)
-                        print_message "ERROR" "Неверный ввод."
-                        ;;
-                    esac
-                done
                 
+                local path_choice
+                read -rp " ${GREEN}[?]${RESET} Выберите пункт: " path_choice
+                case "$path_choice" in
+                    1) BOT_BACKUP_PATH="/opt/$bot_folder" ;;
+                    2) BOT_BACKUP_PATH="/root/$bot_folder" ;;
+                    3) BOT_BACKUP_PATH="/opt/stacks/$bot_folder" ;;
+                    4) 
+                        echo ""
+                        read -rp " Введите полный путь: " custom_bot_path
+                        if [[ -z "$custom_bot_path" || ! "$custom_bot_path" = /* ]]; then
+                            print_message "ERROR" "Путь должен быть абсолютным!"
+                            sleep 2; continue
+                        fi
+                        BOT_BACKUP_PATH="${custom_bot_path%/}" 
+                        ;;
+                    *) print_message "ERROR" "Неверный ввод"; sleep 1; continue ;;
+                esac
+
                 echo ""
-                read -rp " Введите имя пользователя PostgreSQL для бота (по умолчанию postgres): " bot_db_user
+                read -rp " $(echo -e "${GREEN}[?]${RESET} Имя пользователя БД для бота (по умолчанию postgres): ")" bot_db_user
                 BOT_BACKUP_DB_USER="${bot_db_user:-postgres}"
+
+                if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
+                    echo ""
+                    print_message "ACTION" "Отключить бэкап панели и оставить ТОЛЬКО бота?"
+                    read -rp " $(echo -e "${GREEN}[?]${RESET} Введите (${GREEN}y${RESET}/${RED}n${RESET}): ")" only_bot_confirm
+                    if [[ "$only_bot_confirm" =~ ^[yY]$ ]]; then
+                        SKIP_PANEL_BACKUP="true"
+                    fi
+                fi
+
                 BOT_BACKUP_ENABLED="true"
                 save_config
-                print_message "SUCCESS" "Бэкап бота успешно настроен и включен."
+                print_message "SUCCESS" "Настройки бота сохранены и активированы."
+                read -rp "Нажмите Enter..."
                 ;;
+
             2)
+                if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+                    SKIP_PANEL_BACKUP="false"
+                    print_message "SUCCESS" "Режим изменен: Панель + Бот"
+                else
+                    SKIP_PANEL_BACKUP="true"
+                    print_message "SUCCESS" "Режим изменен: Только Бот"
+                fi
+                save_config
+                read -rp "Нажмите Enter..."
+                ;;
+
+            3)
                 BOT_BACKUP_ENABLED="false"
                 BOT_BACKUP_PATH=""
                 BOT_BACKUP_SELECTED=""
+                
+                echo ""
+                print_message "SUCCESS" "Бэкап бота отключен."
+
+                if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
+                    print_message "WARN" "Сейчас бэкапы панели также отключены в этом режиме."
+                    read -rp " $(echo -e "${GREEN}[?]${RESET} Включить бэкап панели обратно? (y/n): ")" restore_p
+                    if [[ "$restore_p" =~ ^[yY]$ ]]; then
+                        SKIP_PANEL_BACKUP="false"
+                        print_message "SUCCESS" "Бэкап панели восстановлен."
+                    fi
+                fi
+                
                 save_config
-                print_message "SUCCESS" "Бэкап бота выключен."
+                read -rp "Нажмите Enter для продолжения..."
                 ;;
-            0) 
-                break 
-                ;;
-            *) 
-                print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." 
-                ;;
+
+            0) break ;;
+            *) print_message "ERROR" "Неверный ввод" ; sleep 1 ;;
         esac
-        
-        echo ""
-        read -rp "Нажмите Enter для продолжения..."
     done
 }
 
@@ -357,7 +323,7 @@ restore_bot_backup() {
     local BOT_DIR_ARCHIVE=$(find "$temp_restore_dir" -name "bot_dir_*.tar.gz" | head -n 1)
     
     if [[ -z "$BOT_DUMP_FILE" && -z "$BOT_DIR_ARCHIVE" ]]; then
-        return 0
+        return 2
     fi
 
     clear
@@ -366,8 +332,8 @@ restore_bot_backup() {
     read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить Telegram бота? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" restore_bot_confirm
     
     if [[ "$restore_bot_confirm" != "y" ]]; then
-        print_message "INFO" "Восстановление бота пропущено."
-        return 0
+        print_message "INFO" "Восстановление бота отменено."
+        return 1
     fi
     
     echo ""
@@ -470,7 +436,7 @@ restore_bot_backup() {
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
     
     echo ""
-    read -rp " Введите имя пользователя базы данных бота (по умолчанию postgres): " restore_bot_db_user
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя пользователя базы данных бота (по умолчанию postgres): ")" restore_bot_db_user
     restore_bot_db_user="${restore_bot_db_user:-postgres}"
     echo ""
     read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя базы данных бота (по умолчанию postgres): ")" restore_bot_db_name
@@ -607,12 +573,15 @@ restore_bot_backup() {
         
         mkdir -p "$temp_restore_dir"
 
-        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
+        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
             print_message "ERROR" "Ошибка при восстановлении БД бота."
             echo ""
-            print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
-            cat "$temp_restore_dir/restore_errors.log"
+            if [[ -f "$temp_restore_dir/restore_errors.log" ]]; then
+                print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
+                cat "$temp_restore_dir/restore_errors.log"
+            fi
             [[ -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
+            echo ""
             read -rp "Нажмите Enter для возврата в меню..."
             return 1
         fi
@@ -623,15 +592,13 @@ restore_bot_backup() {
     fi
     
     echo ""
-    print_message "INFO" "Запуск всех контейнеров бота..."
+    print_message "INFO" "Запуск остальных контейнеров бота..."
     if ! docker compose up -d; then
         print_message "ERROR" "Не удалось запустить все контейнеры бота."
         return 1
     fi
     
     sleep 3
-    echo ""
-    print_message "SUCCESS" "Telegram бот успешно восстановлен и запущен!"
     return 0
 }
 
@@ -653,6 +620,7 @@ BOT_BACKUP_ENABLED="$BOT_BACKUP_ENABLED"
 BOT_BACKUP_PATH="$BOT_BACKUP_PATH"
 BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
 BOT_BACKUP_DB_USER="$BOT_BACKUP_DB_USER"
+SKIP_PANEL_BACKUP="$SKIP_PANEL_BACKUP"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
     print_message "SUCCESS" "Конфигурация сохранена."
@@ -669,6 +637,7 @@ load_or_create_config() {
         CRON_TIMES=${CRON_TIMES:-}
         REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         TG_MESSAGE_THREAD_ID=${TG_MESSAGE_THREAD_ID:-}
+        SKIP_PANEL_BACKUP=${SKIP_PANEL_BACKUP:-false}
         
         local config_updated=false
 
@@ -690,12 +659,15 @@ load_or_create_config() {
             config_updated=true
         fi
 
-        [[ -z "$DB_USER" ]] && read -rp "    Введите имя пользователя вашей БД (по умолчанию postgres): " DB_USER
-        DB_USER=${DB_USER:-postgres}
-        config_updated=true
-        echo ""
+        if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$DB_USER" ]]; then
+            print_message "INFO" "Введите имя пользователя БД панели (по умолчанию postgres):"
+            read -rp "    Ввод: " input_db_user
+            DB_USER=${input_db_user:-postgres}
+            config_updated=true
+            echo ""
+        fi
         
-        if [[ -z "$REMNALABS_ROOT_DIR" ]]; then
+        if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$REMNALABS_ROOT_DIR" ]]; then
             print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
             echo " 1. /opt/remnawave"
             echo " 2. /root/remnawave"
@@ -748,7 +720,6 @@ load_or_create_config() {
                 *) print_message "ERROR" "Неверный ввод." ;;
                 esac
             done
-
             config_updated=true
             echo ""
         fi
@@ -768,8 +739,8 @@ load_or_create_config() {
             echo ""
             echo "Если у вас нет Client ID и Client Secret токенов"
             local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
-                echo ""
+            print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
+            echo ""
             [[ -z "$GD_CLIENT_ID" ]] && read -rp "    Введите Google Client ID: " GD_CLIENT_ID
             [[ -z "$GD_CLIENT_SECRET" ]] && read -rp "    Введите Google Client Secret: " GD_CLIENT_SECRET
             clear
@@ -800,16 +771,15 @@ load_or_create_config() {
                     config_updated=true
                 fi
             fi
-            echo
-                    echo "    📁 Чтобы указать папку Google Drive:"
-                    echo "    1. Создайте и откройте нужную папку в браузере."
-                    echo "    2. Посмотрите на ссылку в адресной строке,она выглядит так:"
-                    echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-                    echo "    3. Скопируйте часть после /folders/ — это и есть Folder ID:"
-                    echo "    4. Если оставить поле пустым — бекап будет отправлен в корневую папку Google Drive."
-                    echo
-
-                    read -rp "    Введите Google Drive Folder ID (оставьте пустым для корневой папки): " GD_FOLDER_ID
+            echo ""
+            echo "    📁 Чтобы указать папку Google Drive:"
+            echo "    1. Создайте и откройте нужную папку в браузере."
+            echo "    2. Посмотрите на ссылку в адресной строке,она выглядит так:"
+            echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
+            echo "    3. Скопируйте часть после /folders/ — это и есть Folder ID:"
+            echo "    4. Если оставить поле пустым — бекап будет отправлен в корневую папку Google Drive."
+            echo ""
+            read -rp "    Введите Google Drive Folder ID (оставьте пустым для корневой папки): " GD_FOLDER_ID
             config_updated=true
         fi
 
@@ -823,8 +793,8 @@ load_or_create_config() {
         if [[ "$SCRIPT_RUN_PATH" != "$SCRIPT_PATH" ]]; then
             print_message "INFO" "Конфигурация не найдена. Скрипт запущен из временного расположения."
             print_message "INFO" "Перемещаем скрипт в основной каталог установки: ${BOLD}${SCRIPT_PATH}${RESET}..."
-            mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Не удалось создать каталог установки ${BOLD}${INSTALL_DIR}${RESET}. Проверьте права доступа."; exit 1; }
-            mkdir -p "$BACKUP_DIR" || { print_message "ERROR" "Не удалось создать каталог для бэкапов ${BOLD}${BACKUP_DIR}${RESET}. Проверьте права доступа."; exit 1; }
+            mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Не удалось создать каталог установки ${BOLD}${INSTALL_DIR}${RESET}."; exit 1; }
+            mkdir -p "$BACKUP_DIR" || { print_message "ERROR" "Не удалось создать каталог для бэкапов ${BOLD}${BACKUP_DIR}${RESET}."; exit 1; }
 
             if mv "$SCRIPT_RUN_PATH" "$SCRIPT_PATH"; then
                 chmod +x "$SCRIPT_PATH"
@@ -834,12 +804,28 @@ load_or_create_config() {
                 exec "$SCRIPT_PATH" "$@"
                 exit 0
             else
-                print_message "ERROR" "Не удалось переместить скрипт в ${BOLD}${SCRIPT_PATH}${RESET}. Проверьте права доступа."
+                print_message "ERROR" "Не удалось переместить скрипт в ${BOLD}${SCRIPT_PATH}${RESET}."
                 exit 1
             fi
         else
             print_message "INFO" "Конфигурация не найдена, создаем новую..."
             echo ""
+
+            print_message "ACTION" "Выберите режим работы скрипта:"
+            echo " 1. Полный (Панель Remnawave + Бот опционально)"
+            echo " 2. Только Бот (если панель установлена на другом сервере)"
+            echo ""
+            read -rp " ${GREEN}[?]${RESET} Ваш выбор: " main_mode_choice
+            
+            if [[ "$main_mode_choice" == "2" ]]; then
+                SKIP_PANEL_BACKUP="true"
+                REMNALABS_ROOT_DIR="none"
+            else
+                SKIP_PANEL_BACKUP="false"
+            fi
+            echo ""
+
+            print_message "INFO" "Настройка уведомлений Telegram:"
             print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
             read -rp "    Введите API Token: " BOT_TOKEN
             echo ""
@@ -851,69 +837,51 @@ load_or_create_config() {
             echo -e "       Оставьте пустым для общего потока или отправки напрямую в бота"
             read -rp "    Введите Message Thread ID: " TG_MESSAGE_THREAD_ID
             echo ""
-            read -rp "    Введите имя пользователя PostgreSQL (по умолчанию postgres): " DB_USER
-            DB_USER=${DB_USER:-postgres}
-            echo ""
 
-            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
-            echo " 1. /opt/remnawave"
-            echo " 2. /root/remnawave"
-            echo " 3. /opt/stacks/remnawave"
-            echo " 4. Указать свой путь"
-            echo ""
+            if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
+                print_message "INFO" "Введите имя пользователя БД (по умолчанию postgres):"
+                read -rp "    Ввод: " input_db_user
+                DB_USER=${input_db_user:-postgres}
+                echo ""
 
-            local remnawave_path_choice
-            while true; do
-                read -rp " ${GREEN}[?]${RESET} Выберите вариант: " remnawave_path_choice
-                case "$remnawave_path_choice" in
-                1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
-                2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
-                3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
-                4) 
-                    echo ""
-                    print_message "INFO" "Введите полный путь к директории панели Remnawave:"
-                    read -rp " Путь: " custom_remnawave_path
-    
-                    if [[ -z "$custom_remnawave_path" ]]; then
-                        print_message "ERROR" "Путь не может быть пустым."
+                print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
+                echo " 1. /opt/remnawave"
+                echo " 2. /root/remnawave"
+                echo " 3. /opt/stacks/remnawave"
+                echo " 4. Указать свой путь"
+                echo ""
+
+                local remnawave_path_choice
+                while true; do
+                    read -rp " ${GREEN}[?]${RESET} Выберите вариант: " remnawave_path_choice
+                    case "$remnawave_path_choice" in
+                    1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
+                    2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
+                    3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
+                    4) 
                         echo ""
-                        read -rp "Нажмите Enter, чтобы продолжить..."
-                        continue
-                    fi
-    
-                    if [[ ! "$custom_remnawave_path" = /* ]]; then
-                        print_message "ERROR" "Путь должен быть абсолютным (начинаться с /)."
-                        echo ""
-                        read -rp "Нажмите Enter, чтобы продолжить..."
-                        continue
-                    fi
-    
-                    custom_remnawave_path="${custom_remnawave_path%/}"
-    
-                    if [[ ! -d "$custom_remnawave_path" ]]; then
-                        print_message "WARN" "Директория ${BOLD}${custom_remnawave_path}${RESET} не существует."
-                        read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_path
-                        if [[ "$confirm_custom_path" != "y" ]]; then
-                            echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
-                            continue
+                        print_message "INFO" "Введите полный путь к директории панели Remnawave:"
+                        read -rp " Путь: " custom_remnawave_path
+                        if [[ -n "$custom_remnawave_path" ]]; then
+                            REMNALABS_ROOT_DIR="${custom_remnawave_path%/}"
+                            break
                         fi
-                    fi
-    
-                    REMNALABS_ROOT_DIR="$custom_remnawave_path"
-                    print_message "SUCCESS" "Установлен кастомный путь: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-                    break 
-                    ;;
-                *) print_message "ERROR" "Неверный ввод." ;;
-                esac
-            done
-            echo ""
+                        ;;
+                    *) print_message "ERROR" "Неверный ввод." ;;
+                    esac
+                done
+            fi
 
-            mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Не удалось создать каталог установки ${BOLD}${INSTALL_DIR}${RESET}. Проверьте права доступа."; exit 1; }
-            mkdir -p "$BACKUP_DIR" || { print_message "ERROR" "Не удалось создать каталог для бэкапов ${BOLD}${BACKUP_DIR}${RESET}. Проверьте права доступа."; exit 1; }
+            mkdir -p "$INSTALL_DIR"
+            mkdir -p "$BACKUP_DIR"
             save_config
             print_message "SUCCESS" "Новая конфигурация сохранена в ${BOLD}${CONFIG_FILE}${RESET}"
         fi
+    fi
+
+    if [[ "$SKIP_PANEL_BACKUP" != "true" && ! -d "$REMNALABS_ROOT_DIR" ]]; then
+        print_message "ERROR" "Директория Remnawave не найдена по пути $REMNALABS_ROOT_DIR. Проверьте настройки в $CONFIG_FILE"
+        exit 1
     fi
     echo ""
 }
@@ -1112,66 +1080,76 @@ create_backup() {
         exit 1
     }
     
-    if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
-        echo -e "${RED}❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Невозможно создать бэкап базы данных.${RESET}"
-        local error_msg="❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Не удалось создать бэкап."
-        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            send_telegram_message "$error_msg" "None"
-        elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с контейнером DB."
-        fi
-        exit 1
-    fi
+    BACKUP_ITEMS=()
     
-    print_message "INFO" "Создание PostgreSQL дампа и сжатие в файл..."
-    if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
-        STATUS=$?
-        echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}$STATUS${RESET}. Проверьте имя пользователя БД и доступ к контейнеру.${RESET}"
-        local error_msg="❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}${STATUS}${RESET}"
-        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            send_telegram_message "$error_msg" "None"
-        elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с дампом DB."
-        fi
-        exit $STATUS
-    fi
-    
-    print_message "SUCCESS" "Дамп PostgreSQL успешно создан."
-    echo ""
-    print_message "INFO" "Архивирование директории Remnawave и создание итогового бэкапа..."
-    BACKUP_ITEMS=("$BACKUP_FILE_DB")
-    
-    REMNAWAVE_DIR_ARCHIVE="remnawave_dir_${TIMESTAMP}.tar.gz"
-    
-    if [ -d "$REMNALABS_ROOT_DIR" ]; then
-        print_message "INFO" "Архивирование директории ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
-        
-        local exclude_args=""
-        for pattern in $BACKUP_EXCLUDE_PATTERNS; do
-            exclude_args+="--exclude=$pattern "
-        done
-        
-        if eval "tar -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'"; then
-            print_message "SUCCESS" "Директория Remnawave успешно заархивирована."
-            BACKUP_ITEMS+=("$REMNAWAVE_DIR_ARCHIVE")
-        else
-            STATUS=$?
-            echo -e "${RED}❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
-            local error_msg="❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}${STATUS}${RESET}"
+    if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+        print_message "INFO" "Пропускаю бэкап панели Remnawave."
+    else
+        if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
+            echo -e "${RED}❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Невозможно создать бэкап базы данных.${RESET}"
+            local error_msg="❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Не удалось создать бэкап."
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
                 send_telegram_message "$error_msg" "None"
+            elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
+                print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с контейнером DB."
+            fi
+            exit 1
+        fi
+        
+        print_message "INFO" "Создание PostgreSQL дампа и сжатие в файл..."
+        if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
+            STATUS=$?
+            echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}$STATUS${RESET}. Проверьте имя пользователя БД и доступ к контейнеру.${RESET}"
+            local error_msg="❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}${STATUS}${RESET}"
+            if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
+                send_telegram_message "$error_msg" "None"
+            elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
+                print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с дампом DB."
             fi
             exit $STATUS
         fi
-    else
-        print_message "ERROR" "Директория ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не найдена!"
-        exit 1
+        
+        print_message "SUCCESS" "Дамп PostgreSQL успешно создан."
+        echo ""
+        
+        print_message "INFO" "Архивирование директории Remnawave..."
+        REMNAWAVE_DIR_ARCHIVE="remnawave_dir_${TIMESTAMP}.tar.gz"
+        
+        if [ -d "$REMNALABS_ROOT_DIR" ]; then
+            print_message "INFO" "Архивирование директории ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
+            
+            local exclude_args=""
+            for pattern in $BACKUP_EXCLUDE_PATTERNS; do
+                exclude_args+="--exclude=$pattern "
+            done
+            
+            if eval "tar -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'"; then
+                print_message "SUCCESS" "Директория Remnawave успешно заархивирована."
+                BACKUP_ITEMS=("$BACKUP_FILE_DB" "$REMNAWAVE_DIR_ARCHIVE")
+            else
+                STATUS=$?
+                echo -e "${RED}❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
+                local error_msg="❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}${STATUS}${RESET}"
+                if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
+                    send_telegram_message "$error_msg" "None"
+                fi
+                exit $STATUS
+            fi
+        else
+            print_message "ERROR" "Директория ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не найдена!"
+            exit 1
+        fi
     fi
     
     echo ""
-
+    
     create_bot_backup
-
+    
+    if [[ ${#BACKUP_ITEMS[@]} -eq 0 ]]; then
+        print_message "ERROR" "Нет данных для бэкапа! Включите бэкап панели или бота."
+        exit 1
+    fi
+    
     if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}"; then
         STATUS=$?
         echo -e "${RED}❌ Ошибка при создании итогового архива бэкапа. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
@@ -1193,13 +1171,20 @@ create_backup() {
     echo ""
     
     print_message "INFO" "Отправка бэкапа (${UPLOAD_METHOD})..."
+    
     local DATE=$(date +'%Y-%m-%d %H:%M:%S')
-    local bot_status=""
-    if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-        bot_status=$'\n🤖 *Telegram бот:* включен в бэкап'
+    local backup_size=$(du -h "$BACKUP_DIR/$BACKUP_FILE_FINAL" | awk '{print $1}')
+    
+    local backup_info=""
+    if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+        backup_info=$'\n🤖 *Только Telegram бот*'
+    elif [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
+        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🤖 *+ Telegram бот*'
+    else
+        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🖥️ *Только панель*'
     fi
 
-    local caption_text=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Бэкап успешно создан*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}${bot_status}"$'\n📁 *БД + директория*\n📅 *Дата:* '"${DATE}"
+    local caption_text=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Бэкап успешно создан*'"${backup_info}"$'\n📁 *БД + директория*\n📏 *Размер:* '"${backup_size}"$'\n📅 *Дата:* '"${DATE}"
     local backup_size=$(du -h "$BACKUP_DIR/$BACKUP_FILE_FINAL" | awk '{print $1}')
 
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
@@ -1212,7 +1197,7 @@ create_backup() {
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
                 print_message "SUCCESS" "Бэкап успешно отправлен в Google Drive."
-                local tg_success_message=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Бэкап успешно создан и отправлен в Google Drive*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}${bot_status}"$'\n📁 *БД и директория*\n📏 *Размер:* '"${backup_size}"$'\n📅 *Дата:* '"${DATE}"
+                local tg_success_message="${caption_text//Бэкап успешно создан/Бэкап успешно создан и отправлен в Google Drive}"
                 
                 if send_telegram_message "$tg_success_message"; then
                     print_message "SUCCESS" "Уведомление об успешной отправке на Google Drive отправлено в Telegram."
@@ -1429,25 +1414,20 @@ restore_backup() {
     clear
     echo "${GREEN}${BOLD}Восстановление из бэкапа${RESET}"
     echo ""
-    
+
     print_message "INFO" "Поместите файл бэкапа в папку: ${BOLD}${BACKUP_DIR}${RESET}"
     echo ""
-    
+
     if ! compgen -G "$BACKUP_DIR/remnawave_backup_*.tar.gz" > /dev/null; then
-        print_message "ERROR" "Ошибка: Не найдено файлов бэкапов в ${BOLD}${BACKUP_DIR}${RESET}. Пожалуйста, поместите файл бэкапа в этот каталог."
-        echo ""
-        read -rp "Нажмите Enter для возврата в меню..."
-        return
-    fi
-    
-    readarray -t SORTED_BACKUP_FILES < <(find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -printf "%T@ %p\n" | sort -nr | cut -d' ' -f2-)
-    
-    if [ ${#SORTED_BACKUP_FILES[@]} -eq 0 ]; then
         print_message "ERROR" "Ошибка: Не найдено файлов бэкапов в ${BOLD}${BACKUP_DIR}${RESET}."
         read -rp "Нажмите Enter для возврата в меню..."
         return
     fi
-    
+
+    readarray -t SORTED_BACKUP_FILES < <(
+        find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -printf "%T@ %p\n" | sort -nr | cut -d' ' -f2-
+    )
+
     echo ""
     echo "Выберите файл для восстановления:"
     local i=1
@@ -1458,291 +1438,147 @@ restore_backup() {
     echo ""
     echo " 0) Вернуться в главное меню"
     echo ""
-    
-    local user_choice
-    local selected_index
-    
+
+    local user_choice selected_index
     while true; do
-        read -rp "${GREEN}[?]${RESET} Введите номер файла для восстановления (0 для выхода): " user_choice
-        
-        if [[ "$user_choice" == "0" ]]; then
-            print_message "INFO" "Восстановление отменено пользователем."
-            read -rp "Нажмите Enter для возврата в меню..."
-            return
-        fi
-        
-        if ! [[ "$user_choice" =~ ^[0-9]+$ ]]; then
-            print_message "ERROR" "Неверный ввод. Пожалуйста, введите номер."
-            continue
-        fi
-        
+        read -rp "${GREEN}[?]${RESET} Введите номер файла (0 для выхода): " user_choice
+        [[ "$user_choice" == "0" ]] && return
+        [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "Неверный ввод."; continue; }
         selected_index=$((user_choice - 1))
-        
-        if (( selected_index >= 0 && selected_index < ${#SORTED_BACKUP_FILES[@]} )); then
-            SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
-            break
-        else
-            print_message "ERROR" "Неверный номер. Пожалуйста, выберите номер из списка."
-        fi
+        (( selected_index >= 0 && selected_index < ${#SORTED_BACKUP_FILES[@]} )) && break
+        print_message "ERROR" "Неверный номер."
     done
-    
-    echo ""
-    
-    print_message "WARN" "Операция восстановления полностью перезапишет текущую БД"
-    echo "       и директорию Remnawave"
-    echo ""
-    print_message "INFO" "В конфигурации скрипта вы указали имя пользователя БД: ${BOLD}${GREEN}${DB_USER}${RESET}"
-    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET} для продолжения: ")" db_user_confirm
-    
-    if [[ ! "$db_user_confirm" =~ ^[Yy]$ ]]; then
-        print_message "INFO" "Операция восстановления отменена пользователем."
+
+    SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
+
+    clear
+    print_message "INFO" "Распаковка архива бэкапа..."
+    local temp_restore_dir="$BACKUP_DIR/restore_temp_$$"
+    mkdir -p "$temp_restore_dir"
+
+    if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
+        print_message "ERROR" "Ошибка распаковки архива."
+        rm -rf "$temp_restore_dir"
         read -rp "Нажмите Enter для возврата в меню..."
         return
     fi
 
+    print_message "SUCCESS" "Архив распакован."
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} Теперь введите имя базы данных панели (по умолчанию postgres): ")" restore_db_name
-    restore_db_name="${restore_db_name:-postgres}"
-    
-    clear
-    
-    print_message "INFO" "Начало процесса полного сброса и восстановления Remnawave..."
-    echo ""
-    
-    if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-        print_message "INFO" "Директория ${BOLD}${REMNALABS_ROOT_DIR}${RESET} существует. Останавливаем контейнеры и очищаем..."
-        
-        if cd "$REMNALABS_ROOT_DIR" 2>/dev/null && [[ -f "docker-compose.yml" ]]; then
-            print_message "INFO" "Остановка существующих контейнеров Remnawave, ожидайте..."
-            docker compose down 2>/dev/null || print_message "WARN" "Не удалось остановить контейнеры (возможно, они уже остановлены)."
-        else
-            print_message "INFO" "Docker Compose файл не найден, пропускаем остановку контейнеров."
-        fi
-        
-        cd /
-        
-        print_message "INFO" "Удаление старой директории Remnawave..."
-        if ! rm -rf "$REMNALABS_ROOT_DIR"; then
-            print_message "ERROR" "Не удалось удалить директорию ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
-            read -rp "Нажмите Enter для возврата в меню..."
-            return 1
-        fi
-        print_message "SUCCESS" "Старая директория удалена."
+
+    local PANEL_DUMP
+    PANEL_DUMP=$(find "$temp_restore_dir" -name "dump_*.sql.gz" | head -n 1)
+    local PANEL_DIR_ARCHIVE
+    PANEL_DIR_ARCHIVE=$(find "$temp_restore_dir" -name "remnawave_dir_*.tar.gz" | head -n 1)
+
+    local PANEL_STATUS=2 
+    local BOT_STATUS=2
+
+    if [[ -z "$PANEL_DUMP" || -z "$PANEL_DIR_ARCHIVE" ]]; then
+        print_message "WARN" "Файлы панели в бэкапе не найдены."
+        PANEL_STATUS=2
     else
-        print_message "INFO" "Директория ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не существует. Это чистая установка."
-    fi
-    
-    print_message "INFO" "Создание новой директории Remnawave..."
-    if ! mkdir -p "$REMNALABS_ROOT_DIR"; then
-        print_message "ERROR" "Не удалось создать директорию ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    print_message "SUCCESS" "Новая директория создана."
-    
-    print_message "INFO" "Распаковка архива бэкапа..."
-    local temp_restore_dir="$BACKUP_DIR/restore_temp_$$"
-    mkdir -p "$temp_restore_dir"
-    
-    if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
-        STATUS=$?
-        echo -e "${RED}❌ Ошибка при распаковке архива ${BOLD}${SELECTED_BACKUP##*/}${RESET}. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
-        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            send_telegram_message "❌ Ошибка при распаковке архива: ${BOLD}${SELECTED_BACKUP##*/}${RESET}. Код выхода: ${BOLD}${STATUS}${RESET}" "None"
-        fi
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    
-    print_message "SUCCESS" "Архив успешно распакован во временную директорию."
-    echo ""
-    
-    print_message "INFO" "Поиск архива директории Remnawave в бэкапе..."
-    local REMNAWAVE_DIR_ARCHIVE=$(find "$temp_restore_dir" -name "remnawave_dir_*.tar.gz" | head -n 1)
-    
-    if [[ -n "$REMNAWAVE_DIR_ARCHIVE" ]]; then
-        print_message "INFO" "Найден архив директории Remnawave. Начинаю восстановление..."
-        
-        local temp_extract_dir="$BACKUP_DIR/extract_temp_$$"
-        mkdir -p "$temp_extract_dir"
-        
-        if tar -xzf "$REMNAWAVE_DIR_ARCHIVE" -C "$temp_extract_dir"; then
-            print_message "SUCCESS" "Архив директории успешно распакован."
-            
-            local extracted_dir=$(find "$temp_extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+        print_message "WARN" "Найден бэкап панели. Восстановление перезапишет текущую БД."
+        read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить панель? (${GREEN}Y${RESET} - Да / ${RED}N${RESET} - пропустить): ")" confirm_panel
+        echo ""
+        if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
+            print_message "INFO" "Введите имя БД (по умолчанию postgres):"
+            read -rp "Ввод: " restore_db_name
+            restore_db_name="${restore_db_name:-postgres}"
 
-            if [[ -n "$extracted_dir" && -d "$extracted_dir" ]]; then
-                print_message "INFO" "Копирование файлов из архива в директорию Remnawave (папка в архиве: $(basename "$extracted_dir"))..."
+            if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
+                cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
+                cd ~
+                rm -rf "$REMNALABS_ROOT_DIR"
+            fi
 
-                if cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/" 2>/dev/null; then
-                    print_message "SUCCESS" "Файлы директории Remnawave успешно восстановлены."
-                else
-                    print_message "ERROR" "Ошибка при копировании файлов Remnawave."
-                    rm -rf "$temp_extract_dir"
-                    [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-                    read -rp "Нажмите Enter для возврата в меню..."
-                    return 1
-                fi
-            else
-                print_message "ERROR" "Не удалось найти директорию с файлами Remnawave в архиве."
-                rm -rf "$temp_extract_dir"
-                [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
+            mkdir -p "$REMNALABS_ROOT_DIR"
+            local extract_dir="$BACKUP_DIR/extract_temp_$$"
+            mkdir -p "$extract_dir"
+            tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
+            local extracted_dir
+            extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
+            rm -rf "$extract_dir"
+
+            docker volume rm remnawave-db-data 2>/dev/null || true
+            cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
+            docker compose up -d remnawave-db
+
+            print_message "INFO" "Ожидание готовности БД..."
+            until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
+                sleep 2
+                echo -n "."
+            done
+            echo ""
+
+            print_message "INFO" "Восстановление базы данных..."
+            gunzip "$PANEL_DUMP"
+            local sql_file="${PANEL_DUMP%.gz}"
+            local restore_log="$temp_restore_dir/restore_errors.log"
+
+            if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
+                echo ""
+                print_message "ERROR" "Ошибка восстановления БД."
+                [[ -f "$restore_log" ]] && cat "$restore_log"
+                rm -rf "$temp_restore_dir"
                 read -rp "Нажмите Enter для возврата в меню..."
                 return 1
             fi
+
+            print_message "SUCCESS" "База данных успешно восстановлена."
+            echo ""
+            print_message "INFO" "Запуск остальных контейнеров..."
             
-            rm -rf "$temp_extract_dir"
-        else
-            print_message "ERROR" "Ошибка при распаковке архива директории."
-            rm -rf "$temp_extract_dir"
-            [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-            read -rp "Нажмите Enter для возврата в меню..."
-            return 1
-        fi
-    else
-        print_message "WARN" "Архив директории Remnawave не найден в бэкапе."
-        print_message "INFO" "Возможно, это старый формат бэкапа с отдельными файлами .env"
-        
-        ENV_NODE_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
-        ENV_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_FILE"
-        
-        if [ -f "$temp_restore_dir/$ENV_NODE_FILE" ]; then
-            print_message "INFO" "Найден файл ${BOLD}${ENV_NODE_FILE}${RESET} (старый формат). Восстанавливаем..."
-            mv "$temp_restore_dir/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || {
-                print_message "ERROR" "Ошибка при восстановлении ${BOLD}${ENV_NODE_FILE}${RESET}."
-                [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
+            if docker compose up -d; then
+                print_message "SUCCESS" "Панель успешно запущена."
+                PANEL_STATUS=0
+            else
+                print_message "ERROR" "Не удалось запустить контейнеры панели."
+                rm -rf "$temp_restore_dir"
                 read -rp "Нажмите Enter для возврата в меню..."
                 return 1
-            }
-            print_message "SUCCESS" "Файл ${BOLD}${ENV_NODE_FILE}${RESET} восстановлен."
-        fi
-        
-        if [ -f "$temp_restore_dir/$ENV_FILE" ]; then
-            print_message "INFO" "Найден файл ${BOLD}${ENV_FILE}${RESET} (старый формат). Восстанавливаем..."
-            mv "$temp_restore_dir/$ENV_FILE" "$ENV_RESTORE_PATH" || {
-                print_message "ERROR" "Ошибка при восстановлении ${BOLD}${ENV_FILE}${RESET}."
-                [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-                read -rp "Нажмите Enter для возврата в меню..."
-                return 1
-            }
-            print_message "SUCCESS" "Файл ${BOLD}${ENV_FILE}${RESET} восстановлен."
-        fi
-    fi
-    
-    print_message "INFO" "Проверка и удаление старых томов БД Remnawave..."
-    if docker volume ls -q | grep -q "remnawave-db-data"; then
-        if docker volume rm remnawave-db-data 2>/dev/null; then
-            print_message "SUCCESS" "Старый том БД remnawave-db-data удален."
+            fi
         else
-            print_message "WARN" "Не удалось удалить том remnawave-db-data (возможно, используется контейнером)."
+            print_message "INFO" "Восстановление панели пропущено пользователем."
+            PANEL_STATUS=2
         fi
-    else
-        print_message "INFO" "Старых томов БД не найдено."
-    fi
-    
-    if ! cd "$REMNALABS_ROOT_DIR"; then
-        print_message "ERROR" "Не удалось перейти в восстановленную директорию ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    
-    if [[ ! -f "docker-compose.yml" ]]; then
-        print_message "ERROR" "Файл docker-compose.yml не найден в восстановленной директории."
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    
-    echo ""
-    print_message "INFO" "Запуск контейнера с базой данных Remnawave..."
-    docker compose rm -f remnawave-db > /dev/null 2>&1
-    
-    if ! docker compose up -d remnawave-db; then
-        print_message "ERROR" "Не удалось запустить контейнер БД Remnawave."
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
     fi
 
     echo ""
-    print_message "INFO" "Ожидание готовности базы данных..."
-    local wait_count=0
-    local max_wait=60
-    
-    until [ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]; do
-        sleep 2
-        echo -n "."
-        wait_count=$((wait_count + 1))
-        if [ $wait_count -gt $max_wait ]; then
-            echo ""
-            print_message "ERROR" "Превышено время ожидания готовности БД Remnawave."
-            [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-            read -rp "Нажмите Enter для возврата в меню..."
-            return 1
-        fi
-    done
-    echo ""
-    print_message "SUCCESS" "База данных готова."
-    
-    echo ""
-    
-    print_message "INFO" "Восстановление базы данных из дампа..."
-    local DUMP_FILE_GZ=$(find "$temp_restore_dir" -name "dump_*.sql.gz" | head -n 1)
-    
-    if [[ -z "$DUMP_FILE_GZ" ]]; then
-        print_message "ERROR" "Файл дампа не найден в архиве. Восстановление невозможно."
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
+
+    if [[ "$PANEL_STATUS" == "0" ]]; then
+        print_message "WARN" "Панель готова. Нажмите Enter для продолжения..."
+        read -rp ""
     fi
-    
-    local DUMP_FILE="${DUMP_FILE_GZ%.gz}"
-    
-    if ! gunzip "$DUMP_FILE_GZ"; then
-        print_message "ERROR" "Не удалось распаковать дамп SQL: ${DUMP_FILE_GZ}"
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
+
+    if restore_bot_backup "$temp_restore_dir"; then
+        BOT_STATUS=0
+    else
+        local res=$?
+        if [[ "$res" == "2" ]]; then BOT_STATUS=2; else BOT_STATUS=1; fi
     fi
-    
-    if ! docker exec -i remnawave-db psql -q -U "${DB_USER}" -d "$restore_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
-        print_message "ERROR" "Ошибка при восстановлении дампа базы данных."
-        echo ""
-        print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
-        cat "$temp_restore_dir/restore_errors.log"
-        [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    
-    print_message "SUCCESS" "База данных успешно восстановлена."
-    echo ""
-    print_message "INFO" "Запуск всех контейнеров Remnawave..."
-    if ! docker compose up -d; then
-        print_message "ERROR" "Не удалось запустить все контейнеры Remnawave."
-        read -rp "Нажмите Enter для возврата в меню..."
-        return 1
-    fi
-    
-    echo ""
-    restore_bot_backup "$temp_restore_dir"
-    
-    print_message "INFO" "Удаление временных файлов восстановления..."
-    [[ -n "$temp_restore_dir" && -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
-    
-    sleep 3
-    
-    echo ""
-    print_message "SUCCESS" "Восстановление завершено. Все контейнеры запущены."
+
+    rm -rf "$temp_restore_dir"
+    sleep 2
     
     REMNAWAVE_VERSION=$(get_remnawave_version)
-    local restore_msg=$'💾 #restore_success\n➖➖➖➖➖➖➖➖➖\n✅ *Восстановление успешно завершено*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"
-    send_telegram_message "$restore_msg" >/dev/null 2>&1
-    
-    read -rp "Нажмите Enter для продолжения..."
-    return
+    local telegram_msg
+    telegram_msg=$'💾 #restore_success\n➖➖➖➖➖➖➖➖➖\n✅ *Восстановление завершено*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"
+
+    if [[ "$PANEL_STATUS" == "0" && "$BOT_STATUS" == "0" ]]; then
+        telegram_msg+=$'\n✨ *Панель и Telegram бот*'
+    elif [[ "$PANEL_STATUS" == "0" ]]; then
+        telegram_msg+=$'\n📦 *Только панель*'
+    elif [[ "$BOT_STATUS" == "0" ]]; then
+        telegram_msg+=$'\n🤖 *Только Telegram бот*'
+    else
+        telegram_msg+=$'\n⚠️ *Ничего не восстановлено*'
+    fi
+
+    print_message "SUCCESS" "Процесс восстановления завершен."
+    send_telegram_message "$telegram_msg" >/dev/null 2>&1
+    read -rp "Нажмите Enter для возврата в меню..."
 }
 
 update_script() {
