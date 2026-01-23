@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="2.2.0"
+VERSION="2.2.1"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -149,6 +149,7 @@ configure_bot_backup() {
                 echo ""
                 echo " 1. Бот от Иисуса (remnawave-telegram-shop)"
                 echo " 2. Бот от Мачки (remnawave-tg-shop)"
+                echo " 3. Бот от Snoups (remnashop)"
                 echo " 0. Назад"
                 echo ""
                 
@@ -157,6 +158,7 @@ configure_bot_backup() {
                 case "$bot_choice" in
                     1) BOT_BACKUP_SELECTED="Бот от Иисуса"; bot_folder="remnawave-telegram-shop" ;;
                     2) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
+                    3) BOT_BACKUP_SELECTED="Бот от Snoups"; bot_folder="remnashop" ;;
                     0) continue ;;
                     *) print_message "ERROR" "Неверный ввод"; sleep 1; continue ;;
                 esac
@@ -255,10 +257,34 @@ get_bot_params() {
         "Бот от Мачки")
             echo "remnawave-tg-shop-db|remnawave-tg-shop-db-data|remnawave-tg-shop|remnawave-tg-shop-db"
             ;;
+        "Бот от Snoups")
+            echo "remnashop-db|remnashop-db-data|remnashop|remnashop-db"
+            ;;
         *)
             echo "|||"
             ;;
     esac
+}
+
+check_docker_installed() {
+    if ! command -v docker &> /dev/null; then
+        print_message "ERROR" "Docker не установлен на этом сервере. Он требуется для восстановления."
+        read -rp " ${GREEN}[?]${RESET} Хотите установить Docker сейчас? (${GREEN}y${RESET}/${RED}n${RESET}): " install_choice
+        
+        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+            print_message "INFO" "Установка Docker в тихом режиме..."
+            if curl -fsSL https://get.docker.com | sh > /dev/null 2>&1; then
+                print_message "SUCCESS" "Docker успешно установлен."
+            else
+                print_message "ERROR" "Произошла ошибка при установке Docker."
+                return 1
+            fi
+        else
+            print_message "INFO" "Операция отменена пользователем."
+            return 1
+        fi
+    fi
+    return 0
 }
 
 create_bot_backup() {
@@ -326,6 +352,8 @@ restore_bot_backup() {
         return 2
     fi
 
+    check_docker_installed || return 1
+
     clear
     print_message "INFO" "Обнаружен бэкап Telegram бота в архиве."
     echo ""
@@ -340,6 +368,7 @@ restore_bot_backup() {
     print_message "ACTION" "Какой бот был в бэкапе?"
     echo " 1. Бот от Иисуса (remnawave-telegram-shop)"
     echo " 2. Бот от Мачки (remnawave-tg-shop)"
+    echo " 3. Бот от Snoups (remnashop)"
     echo ""
     
     local bot_choice
@@ -349,6 +378,7 @@ restore_bot_backup() {
         case "$bot_choice" in
             1) selected_bot_name="Бот от Иисуса"; break ;;
             2) selected_bot_name="Бот от Мачки"; break ;;
+            3) selected_bot_name="Бот от Snoups"; break ;;
             *) print_message "ERROR" "Неверный ввод." ;;
         esac
     done
@@ -359,10 +389,14 @@ restore_bot_backup() {
         echo " 1. /opt/remnawave-telegram-shop"
         echo " 2. /root/remnawave-telegram-shop"
         echo " 3. /opt/stacks/remnawave-telegram-shop"
-    else
+    elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
         echo " 1. /opt/remnawave-tg-shop"
         echo " 2. /root/remnawave-tg-shop"
         echo " 3. /opt/stacks/remnawave-tg-shop"
+    else
+        echo " 1. /opt/remnashop"
+        echo " 2. /root/remnashop"
+        echo " 3. /opt/stacks/remnashop"
     fi
     echo " 4. Указать свой путь"
     echo ""
@@ -377,24 +411,30 @@ restore_bot_backup() {
         1)
             if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
                 restore_path="/opt/remnawave-telegram-shop"
-            else
+            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
                 restore_path="/opt/remnawave-tg-shop"
+            else
+                restore_path="/opt/remnashop"
             fi
             break
             ;;
         2)
             if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
                 restore_path="/root/remnawave-telegram-shop"
-            else
+            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
                 restore_path="/root/remnawave-tg-shop"
+            else
+                restore_path="/root/remnashop"
             fi
             break
             ;;
         3)
             if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
                 restore_path="/opt/stacks/remnawave-telegram-shop"
-            else
+            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
                 restore_path="/opt/stacks/remnawave-tg-shop"
+            else
+                restore_path="/opt/stacks/remnashop"
             fi
             break
             ;;
@@ -1482,6 +1522,7 @@ restore_backup() {
         read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить панель? (${GREEN}Y${RESET} - Да / ${RED}N${RESET} - пропустить): ")" confirm_panel
         echo ""
         if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
+            check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
             print_message "INFO" "Введите имя БД (по умолчанию postgres):"
             read -rp "Ввод: " restore_db_name
             restore_db_name="${restore_db_name:-postgres}"
