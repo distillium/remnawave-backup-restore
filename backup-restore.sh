@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="2.2.1"
+VERSION="2.2.2"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -20,6 +20,13 @@ GD_CLIENT_SECRET=""
 GD_REFRESH_TOKEN=""
 GD_FOLDER_ID=""
 UPLOAD_METHOD="telegram"
+DB_CONNECTION_TYPE="docker"
+DB_HOST=""
+DB_PORT="5432"
+DB_NAME="postgres"
+DB_PASSWORD=""
+DB_SSL_MODE="prefer"
+DB_POSTGRES_VERSION="17"
 CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
 UPDATE_AVAILABLE=false
@@ -661,6 +668,13 @@ BOT_BACKUP_PATH="$BOT_BACKUP_PATH"
 BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
 BOT_BACKUP_DB_USER="$BOT_BACKUP_DB_USER"
 SKIP_PANEL_BACKUP="$SKIP_PANEL_BACKUP"
+DB_CONNECTION_TYPE="$DB_CONNECTION_TYPE"
+DB_HOST="$DB_HOST"
+DB_PORT="$DB_PORT"
+DB_NAME="$DB_NAME"
+DB_PASSWORD="$DB_PASSWORD"
+DB_SSL_MODE="$DB_SSL_MODE"
+DB_POSTGRES_VERSION="$DB_POSTGRES_VERSION"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
     print_message "SUCCESS" "Конфигурация сохранена."
@@ -678,6 +692,13 @@ load_or_create_config() {
         REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         TG_MESSAGE_THREAD_ID=${TG_MESSAGE_THREAD_ID:-}
         SKIP_PANEL_BACKUP=${SKIP_PANEL_BACKUP:-false}
+        DB_CONNECTION_TYPE=${DB_CONNECTION_TYPE:-docker}
+        DB_HOST=${DB_HOST:-}
+        DB_PORT=${DB_PORT:-5432}
+        DB_NAME=${DB_NAME:-postgres}
+        DB_PASSWORD=${DB_PASSWORD:-}
+        DB_SSL_MODE=${DB_SSL_MODE:-prefer}
+        DB_POSTGRES_VERSION=${DB_POSTGRES_VERSION:-17}
         
         local config_updated=false
 
@@ -960,6 +981,146 @@ get_remnawave_version() {
     fi
 }
 
+get_postgres_image() {
+    echo "postgres:${DB_POSTGRES_VERSION}-alpine"
+}
+
+LAST_DB_ERROR=""
+
+create_panel_db_dump() {
+    local dump_file="$1"
+    local pg_image=$(get_postgres_image)
+    LAST_DB_ERROR=""
+    
+    case "$DB_CONNECTION_TYPE" in
+        docker)
+            if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
+                LAST_DB_ERROR="Контейнер 'remnawave-db' не найден или не запущен."
+                print_message "ERROR" "$LAST_DB_ERROR"
+                return 1
+            fi
+            
+            local docker_error_log=$(mktemp)
+            if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"; then
+                LAST_DB_ERROR=$(cat "$docker_error_log" 2>/dev/null | head -5 | tr '\n' ' ')
+                rm -f "$docker_error_log"
+                return 1
+            fi
+            rm -f "$docker_error_log"
+            ;;
+        external)
+            if [[ -z "$DB_HOST" ]]; then
+                print_message "ERROR" "Не указан хост внешней БД. Настройте подключение в меню 'Настройка конфигурации'."
+                return 1
+            fi
+            
+            print_message "INFO" "Подключение к внешней БД: ${BOLD}${DB_HOST}:${DB_PORT}/${DB_NAME}${RESET}"
+            
+            local pg_dump_error_log=$(mktemp)
+            local pg_dump_output
+            
+            pg_dump_output=$(docker run --rm --network host \
+                -e PGPASSWORD="$DB_PASSWORD" \
+                -e PGSSLMODE="$DB_SSL_MODE" \
+                "$pg_image" \
+                pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+                --clean --if-exists 2>"$pg_dump_error_log")
+            
+            local pg_dump_exit_code=$?
+            
+            if [[ $pg_dump_exit_code -ne 0 ]] || [[ -z "$pg_dump_output" ]]; then
+                print_message "ERROR" "Ошибка при создании дампа внешней БД."
+                if [[ -s "$pg_dump_error_log" ]]; then
+                    LAST_DB_ERROR=$(cat "$pg_dump_error_log" | head -5 | tr '\n' ' ')
+                    print_message "ERROR" "Детали ошибки:"
+                    cat "$pg_dump_error_log"
+                fi
+                rm -f "$pg_dump_error_log"
+                return 1
+            fi
+            
+            echo "$pg_dump_output" | gzip -9 > "$dump_file"
+            rm -f "$pg_dump_error_log"
+            
+            local dump_size=$(stat -f%z "$dump_file" 2>/dev/null || stat -c%s "$dump_file" 2>/dev/null)
+            if [[ "$dump_size" -lt 100 ]]; then
+                LAST_DB_ERROR="Дамп БД пустой или слишком маленький (${dump_size} байт). Проверьте подключение к БД."
+                print_message "ERROR" "$LAST_DB_ERROR"
+                return 1
+            fi
+            ;;
+        *)
+            print_message "ERROR" "Неизвестный тип подключения: ${BOLD}${DB_CONNECTION_TYPE}${RESET}"
+            return 1
+            ;;
+    esac
+    
+    return 0
+}
+
+restore_panel_db_dump() {
+    local sql_file="$1"
+    local restore_db_name="$2"
+    local restore_log="$3"
+    local pg_image=$(get_postgres_image)
+    
+    case "$DB_CONNECTION_TYPE" in
+        docker)
+            if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
+                return 1
+            fi
+            ;;
+        external)
+            print_message "INFO" "Восстановление во внешнюю БД: ${BOLD}${DB_HOST}:${DB_PORT}/${DB_NAME}${RESET}"
+            
+            if ! docker run --rm -i --network host \
+                -e PGPASSWORD="$DB_PASSWORD" \
+                -e PGSSLMODE="$DB_SSL_MODE" \
+                "$pg_image" \
+                psql -q -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$restore_db_name" \
+                2> "$restore_log" < "$sql_file"; then
+                return 1
+            fi
+            ;;
+        *)
+            print_message "ERROR" "Неизвестный тип подключения: ${BOLD}${DB_CONNECTION_TYPE}${RESET}"
+            return 1
+            ;;
+    esac
+    
+    return 0
+}
+
+send_telegram_error() {
+    local message="$1"
+    
+    if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
+        print_message "ERROR" "Telegram BOT_TOKEN или CHAT_ID не настроены. Сообщение не отправлено."
+        return 1
+    fi
+
+    local url="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+    local data_params=(
+        -d chat_id="$CHAT_ID"
+        -d text="$message"
+        -d parse_mode="Markdown"
+    )
+
+    [[ -n "$TG_MESSAGE_THREAD_ID" ]] && data_params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
+
+    local response
+    response=$(curl -s -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
+    local http_code=$(echo "$response" | tail -n1)
+
+    if [[ "$http_code" -eq 200 ]]; then
+        return 0
+    else
+        response=$(curl -s -X POST "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
+        http_code=$(echo "$response" | tail -n1)
+        [[ "$http_code" -eq 200 ]] && return 0 || return 1
+    fi
+}
+
 send_telegram_message() {
     local message="$1"
     local parse_mode="${2:-MarkdownV2}"
@@ -1125,28 +1286,27 @@ create_backup() {
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
         print_message "INFO" "Пропускаю бэкап панели Remnawave."
     else
-        if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
-            echo -e "${RED}❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Невозможно создать бэкап базы данных.${RESET}"
-            local error_msg="❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Не удалось создать бэкап."
-            if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-                send_telegram_message "$error_msg" "None"
-            elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-                print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с контейнером DB."
-            fi
-            exit 1
+        if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+            print_message "INFO" "Создание PostgreSQL дампа из Docker-контейнера..."
+        else
+            print_message "INFO" "Создание PostgreSQL дампа из внешней БД (${BOLD}${DB_HOST}${RESET})..."
         fi
         
-        print_message "INFO" "Создание PostgreSQL дампа и сжатие в файл..."
-        if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
+        if ! create_panel_db_dump "$BACKUP_DIR/$BACKUP_FILE_DB"; then
             STATUS=$?
-            echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}$STATUS${RESET}. Проверьте имя пользователя БД и доступ к контейнеру.${RESET}"
-            local error_msg="❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}${STATUS}${RESET}"
+            echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL.${RESET}"
+            local error_msg="❌ *Ошибка при создании дампа PostgreSQL*"
+            if [[ -n "$LAST_DB_ERROR" ]]; then
+                local truncated_error="${LAST_DB_ERROR:0:500}"
+                error_msg="${error_msg}"$'\n\n'"Детали:"$'\n'"\`\`\`"$'\n'"${truncated_error}"$'\n'"\`\`\`"
+            fi
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-                send_telegram_message "$error_msg" "None"
+                send_telegram_error "$error_msg"
             elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
                 print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с дампом DB."
+                send_telegram_error "$error_msg"
             fi
-            exit $STATUS
+            exit ${STATUS:-1}
         fi
         
         print_message "SUCCESS" "Дамп PostgreSQL успешно создан."
@@ -1519,46 +1679,76 @@ restore_backup() {
         PANEL_STATUS=2
     else
         print_message "WARN" "Найден бэкап панели. Восстановление перезапишет текущую БД."
+        if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+            print_message "INFO" "Тип подключения: ${BOLD}Docker${RESET} (контейнер remnawave-db)"
+        else
+            print_message "INFO" "Тип подключения: ${BOLD}Внешняя БД${RESET} (${DB_HOST}:${DB_PORT}/${DB_NAME})"
+        fi
         read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить панель? (${GREEN}Y${RESET} - Да / ${RED}N${RESET} - пропустить): ")" confirm_panel
         echo ""
         if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
             check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
-            print_message "INFO" "Введите имя БД (по умолчанию postgres):"
-            read -rp "Ввод: " restore_db_name
-            restore_db_name="${restore_db_name:-postgres}"
-
-            if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-                cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
-                cd ~
-                rm -rf "$REMNALABS_ROOT_DIR"
+            
+            local restore_db_name
+            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                restore_db_name="$DB_NAME"
+                print_message "INFO" "Используется имя БД из настроек: ${BOLD}${restore_db_name}${RESET}"
+            else
+                print_message "INFO" "Введите имя БД (по умолчанию postgres):"
+                read -rp "Ввод: " restore_db_name
+                restore_db_name="${restore_db_name:-postgres}"
             fi
 
-            mkdir -p "$REMNALABS_ROOT_DIR"
-            local extract_dir="$BACKUP_DIR/extract_temp_$$"
-            mkdir -p "$extract_dir"
-            tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
-            local extracted_dir
-            extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-            cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
-            rm -rf "$extract_dir"
+            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
+                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
+                    cd ~
+                    rm -rf "$REMNALABS_ROOT_DIR"
+                fi
 
-            docker volume rm remnawave-db-data 2>/dev/null || true
-            cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
-            docker compose up -d remnawave-db
+                mkdir -p "$REMNALABS_ROOT_DIR"
+                local extract_dir="$BACKUP_DIR/extract_temp_$$"
+                mkdir -p "$extract_dir"
+                tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
+                local extracted_dir
+                extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+                cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
+                rm -rf "$extract_dir"
 
-            print_message "INFO" "Ожидание готовности БД..."
-            until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
-                sleep 2
-                echo -n "."
-            done
-            echo ""
+                docker volume rm remnawave-db-data 2>/dev/null || true
+                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
+                docker compose up -d remnawave-db
+
+                print_message "INFO" "Ожидание готовности БД..."
+                until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
+                    sleep 2
+                    echo -n "."
+                done
+                echo ""
+            else
+                print_message "INFO" "Восстановление директории панели..."
+                if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
+                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
+                    cd ~
+                    rm -rf "$REMNALABS_ROOT_DIR"
+                fi
+
+                mkdir -p "$REMNALABS_ROOT_DIR"
+                local extract_dir="$BACKUP_DIR/extract_temp_$$"
+                mkdir -p "$extract_dir"
+                tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
+                local extracted_dir
+                extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+                cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
+                rm -rf "$extract_dir"
+            fi
 
             print_message "INFO" "Восстановление базы данных..."
             gunzip "$PANEL_DUMP"
             local sql_file="${PANEL_DUMP%.gz}"
             local restore_log="$temp_restore_dir/restore_errors.log"
 
-            if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
+            if ! restore_panel_db_dump "$sql_file" "$restore_db_name" "$restore_log"; then
                 echo ""
                 print_message "ERROR" "Ошибка восстановления БД."
                 [[ -f "$restore_log" ]] && cat "$restore_log"
@@ -1569,16 +1759,31 @@ restore_backup() {
 
             print_message "SUCCESS" "База данных успешно восстановлена."
             echo ""
-            print_message "INFO" "Запуск остальных контейнеров..."
             
-            if docker compose up -d; then
-                print_message "SUCCESS" "Панель успешно запущена."
-                PANEL_STATUS=0
+            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                print_message "INFO" "Запуск остальных контейнеров..."
+                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
+                if docker compose up -d; then
+                    print_message "SUCCESS" "Панель успешно запущена."
+                    PANEL_STATUS=0
+                else
+                    print_message "ERROR" "Не удалось запустить контейнеры панели."
+                    rm -rf "$temp_restore_dir"
+                    read -rp "Нажмите Enter для возврата в меню..."
+                    return 1
+                fi
             else
-                print_message "ERROR" "Не удалось запустить контейнеры панели."
-                rm -rf "$temp_restore_dir"
-                read -rp "Нажмите Enter для возврата в меню..."
-                return 1
+                print_message "INFO" "Запуск контейнеров панели (без локальной БД)..."
+                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
+                if docker compose up -d; then
+                    print_message "SUCCESS" "Панель успешно запущена."
+                    PANEL_STATUS=0
+                else
+                    print_message "ERROR" "Не удалось запустить контейнеры панели."
+                    rm -rf "$temp_restore_dir"
+                    read -rp "Нажмите Enter для возврата в меню..."
+                    return 1
+                fi
             fi
         else
             print_message "INFO" "Восстановление панели пропущено пользователем."
@@ -1913,7 +2118,7 @@ configure_settings() {
         echo ""
         echo "   1. Настройки Telegram"
         echo "   2. Настройки Google Drive"
-        echo "   3. Имя пользователя БД Remnawave"
+        echo "   3. Подключение к БД панели"
         echo "   4. Путь Remnawave"
         echo ""
         echo "   0. Вернуться в главное меню"
@@ -2062,17 +2267,181 @@ configure_settings() {
                 done
                 ;;
             3)
-                clear
-                echo -e "${GREEN}${BOLD}Имя пользователя PostgreSQL${RESET}"
-                echo ""
-                print_message "INFO" "Текущее имя пользователя PostgreSQL: ${BOLD}${DB_USER}${RESET}"
-                echo ""
-                read -rp "   Введите новое имя пользователя PostgreSQL (по умолчанию postgres): " NEW_DB_USER
-                DB_USER="${NEW_DB_USER:-postgres}"
-                save_config
-                print_message "SUCCESS" "Имя пользователя PostgreSQL успешно обновлено на ${BOLD}${DB_USER}${RESET}."
-                echo ""
-                read -rp "Нажмите Enter для продолжения..."
+                while true; do
+                    clear
+                    echo -e "${GREEN}${BOLD}Настройки подключения к БД панели${RESET}"
+                    echo ""
+                    if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                        print_message "INFO" "Тип подключения: ${BOLD}Docker${RESET} (контейнер remnawave-db)"
+                    else
+                        print_message "INFO" "Тип подключения: ${BOLD}Внешняя БД${RESET}"
+                        print_message "INFO" "Хост: ${BOLD}${DB_HOST:-не указан}${RESET}"
+                        print_message "INFO" "Порт: ${BOLD}${DB_PORT}${RESET}"
+                        print_message "INFO" "База данных: ${BOLD}${DB_NAME}${RESET}"
+                        print_message "INFO" "SSL режим: ${BOLD}${DB_SSL_MODE}${RESET}"
+                    fi
+                    print_message "INFO" "Пользователь: ${BOLD}${DB_USER}${RESET}"
+                    echo ""
+                    echo "   1. Переключить тип подключения (Docker / Внешняя БД)"
+                    echo "   2. Изменить имя пользователя БД"
+                    if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                        echo "   3. Изменить хост"
+                        echo "   4. Изменить порт"
+                        echo "   5. Изменить имя базы данных"
+                        echo "   6. Изменить пароль"
+                        echo "   7. Изменить SSL режим"
+                        echo "   8. Изменить версию PostgreSQL (текущая: ${DB_POSTGRES_VERSION})"
+                        echo "   9. Проверить подключение"
+                    fi
+                    echo ""
+                    echo "   0. Назад"
+                    echo ""
+                    read -rp "${GREEN}[?]${RESET} Выберите пункт: " db_choice
+                    echo ""
+
+                    case $db_choice in
+                        1)
+                            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                                print_message "ACTION" "Переключение на внешнюю БД..."
+                                echo ""
+                                print_message "WARN" "Пароль будет сохранён в ${BOLD}${CONFIG_FILE}${RESET}."
+                                print_message "INFO" "Убедитесь, что доступ к серверу ограничен."
+                                echo ""
+                                read -rp "   Введите хост БД: " DB_HOST
+                                read -rp "   Введите порт (по умолчанию 5432): " input_port
+                                DB_PORT="${input_port:-5432}"
+                                read -rp "   Введите имя базы данных (по умолчанию postgres): " input_db_name
+                                DB_NAME="${input_db_name:-postgres}"
+                                read -rp "   Введите имя пользователя (по умолчанию postgres): " input_db_user
+                                DB_USER="${input_db_user:-postgres}"
+                                echo ""
+                                read -rsp "   Введите пароль: " DB_PASSWORD
+                                echo ""
+                                echo ""
+                                print_message "ACTION" "Выберите SSL режим:"
+                                echo "   1. disable  - без SSL"
+                                echo "   2. prefer   - SSL если доступен (по умолчанию)"
+                                echo "   3. require  - обязательный SSL"
+                                echo "   4. verify-full - SSL с проверкой сертификата"
+                                echo ""
+                                read -rp "   Выберите (1-4): " ssl_choice
+                                case "$ssl_choice" in
+                                    1) DB_SSL_MODE="disable" ;;
+                                    2) DB_SSL_MODE="prefer" ;;
+                                    3) DB_SSL_MODE="require" ;;
+                                    4) DB_SSL_MODE="verify-full" ;;
+                                    *) DB_SSL_MODE="prefer" ;;
+                                esac
+                                
+                                DB_CONNECTION_TYPE="external"
+                                save_config
+                                print_message "SUCCESS" "Настроено подключение к внешней БД."
+                            else
+                                DB_CONNECTION_TYPE="docker"
+                                save_config
+                                print_message "SUCCESS" "Переключено на Docker-контейнер."
+                            fi
+                            ;;
+                        2)
+                            read -rp "   Введите новое имя пользователя PostgreSQL (по умолчанию postgres): " NEW_DB_USER
+                            DB_USER="${NEW_DB_USER:-postgres}"
+                            save_config
+                            print_message "SUCCESS" "Имя пользователя обновлено на ${BOLD}${DB_USER}${RESET}."
+                            ;;
+                        3)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                read -rp "   Введите новый хост: " DB_HOST
+                                save_config
+                                print_message "SUCCESS" "Хост обновлён на ${BOLD}${DB_HOST}${RESET}."
+                            fi
+                            ;;
+                        4)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                read -rp "   Введите новый порт (по умолчанию 5432): " input_port
+                                DB_PORT="${input_port:-5432}"
+                                save_config
+                                print_message "SUCCESS" "Порт обновлён на ${BOLD}${DB_PORT}${RESET}."
+                            fi
+                            ;;
+                        5)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                read -rp "   Введите новое имя базы данных: " DB_NAME
+                                save_config
+                                print_message "SUCCESS" "Имя базы данных обновлено на ${BOLD}${DB_NAME}${RESET}."
+                            fi
+                            ;;
+                        6)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                echo ""
+                                read -rsp "   Введите новый пароль: " DB_PASSWORD
+                                echo ""
+                                save_config
+                                print_message "SUCCESS" "Пароль обновлён."
+                            fi
+                            ;;
+                        7)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                print_message "ACTION" "Выберите SSL режим:"
+                                echo "   1. disable  - без SSL"
+                                echo "   2. prefer   - SSL если доступен"
+                                echo "   3. require  - обязательный SSL"
+                                echo "   4. verify-full - SSL с проверкой сертификата"
+                                echo ""
+                                read -rp "   Выберите (1-4): " ssl_choice
+                                case "$ssl_choice" in
+                                    1) DB_SSL_MODE="disable" ;;
+                                    2) DB_SSL_MODE="prefer" ;;
+                                    3) DB_SSL_MODE="require" ;;
+                                    4) DB_SSL_MODE="verify-full" ;;
+                                    *) print_message "ERROR" "Неверный выбор." ;;
+                                esac
+                                save_config
+                                print_message "SUCCESS" "SSL режим обновлён на ${BOLD}${DB_SSL_MODE}${RESET}."
+                            fi
+                            ;;
+                        8)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                print_message "INFO" "Текущая версия PostgreSQL: ${BOLD}${DB_POSTGRES_VERSION}${RESET}"
+                                echo ""
+                                echo "   Укажите версию PostgreSQL вашей внешней БД."
+                                echo "   Доступные версии: 13, 14, 15, 16, 17, 18"
+                                echo ""
+                                read -rp "   Введите версию (например, 17): " NEW_DB_POSTGRES_VERSION
+                                if [[ "$NEW_DB_POSTGRES_VERSION" =~ ^[0-9]+$ ]]; then
+                                    DB_POSTGRES_VERSION="$NEW_DB_POSTGRES_VERSION"
+                                    save_config
+                                    print_message "SUCCESS" "Версия PostgreSQL обновлена на ${BOLD}${DB_POSTGRES_VERSION}${RESET}."
+                                    print_message "INFO" "Будет использоваться образ: postgres:${DB_POSTGRES_VERSION}-alpine"
+                                else
+                                    print_message "ERROR" "Неверный формат версии. Введите число (например, 17)."
+                                fi
+                            fi
+                            ;;
+                        9)
+                            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+                                local pg_image=$(get_postgres_image)
+                                print_message "INFO" "Проверка подключения к ${BOLD}${DB_HOST}:${DB_PORT}/${DB_NAME}${RESET}..."
+                                print_message "INFO" "Используется образ: ${BOLD}${pg_image}${RESET}"
+                                local test_error_log=$(mktemp)
+                                if docker run --rm --network host \
+                                    -e PGPASSWORD="$DB_PASSWORD" \
+                                    -e PGSSLMODE="$DB_SSL_MODE" \
+                                    "$pg_image" \
+                                    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" > /dev/null 2>"$test_error_log"; then
+                                    print_message "SUCCESS" "Подключение успешно!"
+                                else
+                                    print_message "ERROR" "Не удалось подключиться к БД:"
+                                    cat "$test_error_log"
+                                fi
+                                rm -f "$test_error_log"
+                            fi
+                            ;;
+                        0) break ;;
+                        *) print_message "ERROR" "Неверный ввод." ;;
+                    esac
+                    echo ""
+                    read -rp "Нажмите Enter для продолжения..."
+                done
                 ;;
             4)
                 clear
