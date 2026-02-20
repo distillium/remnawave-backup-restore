@@ -72,26 +72,26 @@ print_message() {
 setup_symlink() {
     echo ""
     if [[ "$EUID" -ne 0 ]]; then
-        print_message "WARN" "Для управления символической ссылкой ${BOLD}${SYMLINK_PATH}${RESET} требуются права root. Пропускаем настройку."
+        print_message "WARN" "Managing the ${BOLD}${SYMLINK_PATH}${RESET} symbolic link requires root privileges. Skip the setting."
         return 1
     fi
 
     if [[ -L "$SYMLINK_PATH" && "$(readlink -f "$SYMLINK_PATH")" == "$SCRIPT_PATH" ]]; then
-        print_message "SUCCESS" "Символическая ссылка ${BOLD}${SYMLINK_PATH}${RESET} уже настроена и указывает на ${BOLD}${SCRIPT_PATH}${RESET}."
+        print_message "SUCCESS" "The symbolic link ${BOLD}${SYMLINK_PATH}${RESET} is already configured and points to ${BOLD}${SCRIPT_PATH}${RESET}."
         return 0
     fi
 
-    print_message "INFO" "Создание или обновление символической ссылки ${BOLD}${SYMLINK_PATH}${RESET}..."
+    print_message "INFO" "Create or update a symbolic link ${BOLD}${SYMLINK_PATH}${RESET}..."
     rm -f "$SYMLINK_PATH"
     if [[ -d "$(dirname "$SYMLINK_PATH")" ]]; then
         if ln -s "$SCRIPT_PATH" "$SYMLINK_PATH"; then
-            print_message "SUCCESS" "Символическая ссылка ${BOLD}${SYMLINK_PATH}${RESET} успешно настроена."
+            print_message "SUCCESS" "The symbolic link ${BOLD}${SYMLINK_PATH}${RESET} was successfully configured."
         else
-            print_message "ERROR" "Не удалось создать символическую ссылку ${BOLD}${SYMLINK_PATH}${RESET}. Проверьте права доступа."
+            print_message "ERROR" "Failed to create symbolic link ${BOLD}${SYMLINK_PATH}${RESET}. Check your permissions."
             return 1
         fi
     else
-        print_message "ERROR" "Каталог ${BOLD}$(dirname "$SYMLINK_PATH")${RESET} не найден. Символическая ссылка не создана."
+        print_message "ERROR" "Directory ${BOLD}$(dirname"$SYMLINK_PATH")${RESET} not found. The symbolic link was not created."
         return 1
     fi
     echo ""
@@ -101,102 +101,102 @@ setup_symlink() {
 configure_bot_backup() {
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}Настройка бэкапа Telegram бота${RESET}"
+        echo -e "${GREEN}${BOLD}Setting up a Telegram bot backup${RESET}"
         echo ""
         
         if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            echo -e "  Бот:      ${BOLD}${GREEN}${BOT_BACKUP_SELECTED}${RESET}"
-            echo -e "  Путь:     ${BOLD}${WHITE}${BOT_BACKUP_PATH}${RESET}"
+            echo -e "Bot: ${BOLD}${GREEN}${BOT_BACKUP_SELECTED}${RESET}"
+            echo -e "Path: ${BOLD}${WHITE}${BOT_BACKUP_PATH}${RESET}"
             
             if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                echo -e "  Режим:    ${BOLD}${RED}ТОЛЬКО БОТ${RESET}"
+                echo -e "Mode: ${BOLD}${RED}BOT ONLY${RESET}"
             else
-                echo -e "  Режим:    ${BOLD}${GREEN}ПАНЕЛЬ + БОТ${RESET}"
+                echo -e "Mode: ${BOLD}${GREEN}PANEL + BOT${RESET}"
             fi
         else
-            print_message "INFO" "Бэкап бота: ${RED}${BOLD}ВЫКЛЮЧЕН${RESET}"
+            print_message "INFO" "Bot backup: ${RED}${BOLD}OFF${RESET}"
             if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                print_message "WARN" "Внимание: Бэкап панели тоже пропущен (ничего не бэкапится!)"
+                print_message "WARN" "Attention: The panel backup is also skipped (nothing is backed up!)"
             else
-                print_message "INFO" "Режим: бэкап только панели Remnawave"
+                print_message "INFO" "Mode: backup only Remnawave panels"
             fi
         fi
         echo ""
         
-        echo " 1. Настроить / Изменить параметры бота"
+        echo "1. Configure / Change bot parameters"
         
         if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
             if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
                 if [[ "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    echo " 2. Включить бэкап панели обратно (Режим Панель + Бот)"
+                    echo "2. Enable panel backup back (Panel + Bot mode)"
                 fi
             else
-                echo " 2. Исключить бэкап панели (Режим Только Бот)"
+                echo "2. Exclude panel backup (Bot Only Mode)"
             fi
         fi
 
-        echo " 3. Полностью выключить бэкап бота"
+        echo "3. Completely disable bot backup"
         echo ""
-        echo " 0. Вернуться в главное меню"
+        echo "0. Return to main menu"
         echo ""
         
-        read -rp " ${GREEN}[?]${RESET} Выберите пункт: " choice
+        read -rp "${GREEN}[?]${RESET} Select an item:" choice
         
         case $choice in
             1)
                 clear
-                echo -e "${GREEN}${BOLD}Выбор бота для бэкапа${RESET}"
+                echo -e "${GREEN}${BOLD}Selecting a bot for backup${RESET}"
                 echo ""
-                echo " 1. Бот от Иисуса (remnawave-telegram-shop)"
-                echo " 2. Бот от Мачки (remnawave-tg-shop)"
-                echo " 3. Бот от Snoups (remnashop)"
-                echo " 0. Назад"
+                echo "1. Bot from Jesus (remnawave-telegram-shop)"
+                echo "2. Bot from Machka (remnawave-tg-shop)"
+                echo "3. Bot from Snoups (remnashop)"
+                echo "0. Back"
                 echo ""
                 
                 local bot_choice
-                read -rp " ${GREEN}[?]${RESET} Ваш выбор: " bot_choice
+                read -rp "${GREEN}[?]${RESET} Your choice:" bot_choice
                 case "$bot_choice" in
-                    1) BOT_BACKUP_SELECTED="Бот от Иисуса"; bot_folder="remnawave-telegram-shop" ;;
-                    2) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
-                    3) BOT_BACKUP_SELECTED="Бот от Snoups"; bot_folder="remnashop" ;;
+                    1) BOT_BACKUP_SELECTED="Bot from Jesus"; bot_folder="remnawave-telegram-shop" ;;
+                    2) BOT_BACKUP_SELECTED="Bot from Machka"; bot_folder="remnawave-tg-shop" ;;
+                    3) BOT_BACKUP_SELECTED="Bot from Snoups"; bot_folder="remnashop" ;;
                     0) continue ;;
-                    *) print_message "ERROR" "Неверный ввод"; sleep 1; continue ;;
+                    *) print_message "ERROR" "Invalid input"; sleep 1; continue ;;
                 esac
                 
                 echo ""
-                print_message "ACTION" "Выберите путь к директории бота:"
+                print_message "ACTION" "Select the path to the bot directory:"
                 echo " 1. /opt/$bot_folder"
                 echo " 2. /root/$bot_folder"
                 echo " 3. /opt/stacks/$bot_folder"
-                echo " 4. Указать свой путь"
+                echo "4. Show your path"
                 echo ""
                 
                 local path_choice
-                read -rp " ${GREEN}[?]${RESET} Выберите пункт: " path_choice
+                read -rp "${GREEN}[?]${RESET} Select an item:" path_choice
                 case "$path_choice" in
                     1) BOT_BACKUP_PATH="/opt/$bot_folder" ;;
                     2) BOT_BACKUP_PATH="/root/$bot_folder" ;;
                     3) BOT_BACKUP_PATH="/opt/stacks/$bot_folder" ;;
                     4) 
                         echo ""
-                        read -rp " Введите полный путь: " custom_bot_path
+                        read -rp "Enter full path:" custom_bot_path
                         if [[ -z "$custom_bot_path" || ! "$custom_bot_path" = /* ]]; then
-                            print_message "ERROR" "Путь должен быть абсолютным!"
+                            print_message "ERROR" "The path must be absolute!"
                             sleep 2; continue
                         fi
                         BOT_BACKUP_PATH="${custom_bot_path%/}" 
                         ;;
-                    *) print_message "ERROR" "Неверный ввод"; sleep 1; continue ;;
+                    *) print_message "ERROR" "Invalid input"; sleep 1; continue ;;
                 esac
 
                 echo ""
-                read -rp " $(echo -e "${GREEN}[?]${RESET} Имя пользователя БД для бота (по умолчанию postgres): ")" bot_db_user
+                read -rp " $(echo -e "${GREEN}[?]${RESET} Database username for the bot (postgres by default):")" bot_db_user
                 BOT_BACKUP_DB_USER="${bot_db_user:-postgres}"
 
                 if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
                     echo ""
-                    print_message "ACTION" "Отключить бэкап панели и оставить ТОЛЬКО бота?"
-                    read -rp " $(echo -e "${GREEN}[?]${RESET} Введите (${GREEN}y${RESET}/${RED}n${RESET}): ")" only_bot_confirm
+                    print_message "ACTION" "Disable panel backup and leave ONLY the bot?"
+                    read -rp " $(echo -e "${GREEN}[?]${RESET} Enter (${GREEN}y${RESET}/${RED}n${RESET}):")" only_bot_confirm
                     if [[ "$only_bot_confirm" =~ ^[yY]$ ]]; then
                         SKIP_PANEL_BACKUP="true"
                     fi
@@ -204,20 +204,20 @@ configure_bot_backup() {
 
                 BOT_BACKUP_ENABLED="true"
                 save_config
-                print_message "SUCCESS" "Настройки бота сохранены и активированы."
-                read -rp "Нажмите Enter..."
+                print_message "SUCCESS" "The bot settings are saved and activated."
+                read -rp "Press Enter..."
                 ;;
 
             2)
                 if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
                     SKIP_PANEL_BACKUP="false"
-                    print_message "SUCCESS" "Режим изменен: Панель + Бот"
+                    print_message "SUCCESS" "Mode changed: Panel + Bot"
                 else
                     SKIP_PANEL_BACKUP="true"
-                    print_message "SUCCESS" "Режим изменен: Только Бот"
+                    print_message "SUCCESS" "Mode changed: Bot only"
                 fi
                 save_config
-                read -rp "Нажмите Enter..."
+                read -rp "Press Enter..."
                 ;;
 
             3)
@@ -226,23 +226,23 @@ configure_bot_backup() {
                 BOT_BACKUP_SELECTED=""
                 
                 echo ""
-                print_message "SUCCESS" "Бэкап бота отключен."
+                print_message "SUCCESS" "Bot backup is disabled."
 
                 if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    print_message "WARN" "Сейчас бэкапы панели также отключены в этом режиме."
-                    read -rp " $(echo -e "${GREEN}[?]${RESET} Включить бэкап панели обратно? (y/n): ")" restore_p
+                    print_message "WARN" "Currently, panel backups are also disabled in this mode."
+                    read -rp " $(echo -e "${GREEN}[?]${RESET} Do you want to enable panel backup back? (y/n):")" restore_p
                     if [[ "$restore_p" =~ ^[yY]$ ]]; then
                         SKIP_PANEL_BACKUP="false"
-                        print_message "SUCCESS" "Бэкап панели восстановлен."
+                        print_message "SUCCESS" "The panel backup has been restored."
                     fi
                 fi
                 
                 save_config
-                read -rp "Нажмите Enter для продолжения..."
+                read -rp "Press Enter to continue..."
                 ;;
 
             0) break ;;
-            *) print_message "ERROR" "Неверный ввод" ; sleep 1 ;;
+            *) print_message "ERROR" "Invalid input" ; sleep 1 ;;
         esac
     done
 }
@@ -251,13 +251,13 @@ get_bot_params() {
     local bot_name="$1"
     
     case "$bot_name" in
-        "Бот от Иисуса")
+        "Bot from Jesus")
             echo "remnawave-telegram-shop-db|remnawave-telegram-shop-db-data|remnawave-telegram-shop|db"
             ;;
-        "Бот от Мачки")
+        "Bot from Machka")
             echo "remnawave-tg-shop-db|remnawave-tg-shop-db-data|remnawave-tg-shop|remnawave-tg-shop-db"
             ;;
-        "Бот от Snoups")
+        "Bot from Snoups")
             echo "remnashop-db|remnashop-db-data|remnashop|remnashop-db"
             ;;
         *)
@@ -268,19 +268,19 @@ get_bot_params() {
 
 check_docker_installed() {
     if ! command -v docker &> /dev/null; then
-        print_message "ERROR" "Docker не установлен на этом сервере. Он требуется для восстановления."
-        read -rp " ${GREEN}[?]${RESET} Хотите установить Docker сейчас? (${GREEN}y${RESET}/${RED}n${RESET}): " install_choice
+        print_message "ERROR" "Docker is not installed on this server. It is required for recovery."
+        read -rp "${GREEN}[?]${RESET} Want to install Docker now? (${GREEN}y${RESET}/${RED}n${RESET}):" install_choice
         
         if [[ "$install_choice" =~ ^[Yy]$ ]]; then
-            print_message "INFO" "Установка Docker в тихом режиме..."
+            print_message "INFO" "Installing Docker in silent mode..."
             if curl -fsSL https://get.docker.com | sh > /dev/null 2>&1; then
-                print_message "SUCCESS" "Docker успешно установлен."
+                print_message "SUCCESS" "Docker installed successfully."
             else
-                print_message "ERROR" "Произошла ошибка при установке Docker."
+                print_message "ERROR" "An error occurred while installing Docker."
                 return 1
             fi
         else
-            print_message "INFO" "Операция отменена пользователем."
+            print_message "INFO" "The operation was canceled by the user."
             return 1
         fi
     fi
@@ -292,14 +292,14 @@ create_bot_backup() {
         return 0
     fi
     
-    print_message "INFO" "Создание бэкапа Telegram бота: ${BOLD}${BOT_BACKUP_SELECTED}${RESET}..."
+    print_message "INFO" "Creating a Telegram bot backup: ${BOLD}${BOT_BACKUP_SELECTED}${RESET}..."
     
     local bot_params=$(get_bot_params "$BOT_BACKUP_SELECTED")
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
     
     if [[ -z "$BOT_CONTAINER_NAME" ]]; then
-        print_message "ERROR" "Неизвестный бот: $BOT_BACKUP_SELECTED"
-        print_message "INFO" "Продолжаем создание бэкапа без бота..."
+        print_message "ERROR" "Unknown bot: $BOT_BACKUP_SELECTED"
+        print_message "INFO" "We continue creating a backup without the bot..."
         return 0
     fi
 
@@ -307,37 +307,37 @@ create_bot_backup() {
     local BOT_DIR_ARCHIVE="bot_dir_${TIMESTAMP}.tar.gz"
     
     if ! docker inspect "$BOT_CONTAINER_NAME" > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' "$BOT_CONTAINER_NAME" 2>/dev/null | grep -q "true"; then
-        print_message "WARN" "Контейнер бота '$BOT_CONTAINER_NAME' не найден или не запущен. Пропускаем бэкап бота."
+        print_message "WARN" "Bot container '$BOT_CONTAINER_NAME' not found or not running. Skipping bot backup."
         return 0
     fi
     
-    print_message "INFO" "Создание PostgreSQL дампа бота..."
+    print_message "INFO" "Creating a PostgreSQL bot dump..."
     if ! docker exec -t "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
-        print_message "ERROR" "Ошибка при создании дампа PostgreSQL бота. Продолжаем без бэкапа бота..."
+        print_message "ERROR" "Error creating a PostgreSQL bot dump. We continue without a bot backup..."
         return 0
     fi
     
     if [ -d "$BOT_BACKUP_PATH" ]; then
-        print_message "INFO" "Архивирование директории бота ${BOLD}${BOT_BACKUP_PATH}${RESET}..."
+        print_message "INFO" "Archiving the bot directory ${BOLD}${BOT_BACKUP_PATH}${RESET}..."
         local exclude_args=""
         for pattern in $BACKUP_EXCLUDE_PATTERNS; do
             exclude_args+="--exclude=$pattern "
         done
         
         if eval "tar -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'"; then
-            print_message "SUCCESS" "Директория бота успешно заархивирована."
+            print_message "SUCCESS" "The bot directory has been successfully archived."
         else
-            print_message "ERROR" "Ошибка при архивировании директории бота."
+            print_message "ERROR" "Error when archiving the bot directory."
             return 1
         fi
     else
-        print_message "WARN" "Директория бота ${BOLD}${BOT_BACKUP_PATH}${RESET} не найдена! Продолжаем без архива директории бота..."
+        print_message "WARN" "Bot directory ${BOLD}${BOT_BACKUP_PATH}${RESET} not found! We continue without the bot directory archive..."
         return 0
     fi
     
     BACKUP_ITEMS+=("$BOT_BACKUP_FILE_DB" "$BOT_DIR_ARCHIVE")
     
-    print_message "SUCCESS" "Бэкап бота успешно создан."
+    print_message "SUCCESS" "The bot backup has been successfully created."
     echo ""
     return 0
 }
@@ -355,41 +355,41 @@ restore_bot_backup() {
     check_docker_installed || return 1
 
     clear
-    print_message "INFO" "Обнаружен бэкап Telegram бота в архиве."
+    print_message "INFO" "A Telegram bot backup was found in the archive."
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить Telegram бота? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" restore_bot_confirm
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Restore Telegram bot? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:")" restore_bot_confirm
     
     if [[ "$restore_bot_confirm" != "y" ]]; then
-        print_message "INFO" "Восстановление бота отменено."
+        print_message "INFO" "Bot restoration cancelled."
         return 1
     fi
     
     echo ""
-    print_message "ACTION" "Какой бот был в бэкапе?"
-    echo " 1. Бот от Иисуса (remnawave-telegram-shop)"
-    echo " 2. Бот от Мачки (remnawave-tg-shop)"
-    echo " 3. Бот от Snoups (remnashop)"
+    print_message "ACTION" "What bot was in the backup?"
+    echo "1. Bot from Jesus (remnawave-telegram-shop)"
+    echo "2. Bot from Machka (remnawave-tg-shop)"
+    echo "3. Bot from Snoups (remnashop)"
     echo ""
     
     local bot_choice
     local selected_bot_name
     while true; do
-        read -rp " ${GREEN}[?]${RESET} Выберите бота: " bot_choice
+        read -rp "${GREEN}[?]${RESET} Select a bot:" bot_choice
         case "$bot_choice" in
-            1) selected_bot_name="Бот от Иисуса"; break ;;
-            2) selected_bot_name="Бот от Мачки"; break ;;
-            3) selected_bot_name="Бот от Snoups"; break ;;
-            *) print_message "ERROR" "Неверный ввод." ;;
+            1) selected_bot_name="Bot from Jesus"; break ;;
+            2) selected_bot_name="Bot from Machka"; break ;;
+            3) selected_bot_name="Bot from Snoups"; break ;;
+            *) print_message "ERROR" "Invalid input." ;;
         esac
     done
     
     echo ""
-    print_message "ACTION" "Выберите путь для восстановления бота:"
-    if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
+    print_message "ACTION" "Select the path to restore the bot:"
+    if [[ "$selected_bot_name" == "Bot from Jesus" ]]; then
         echo " 1. /opt/remnawave-telegram-shop"
         echo " 2. /root/remnawave-telegram-shop"
         echo " 3. /opt/stacks/remnawave-telegram-shop"
-    elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
+    elif [[ "$selected_bot_name" == "Bot from Machka" ]]; then
         echo " 1. /opt/remnawave-tg-shop"
         echo " 2. /root/remnawave-tg-shop"
         echo " 3. /opt/stacks/remnawave-tg-shop"
@@ -398,20 +398,20 @@ restore_bot_backup() {
         echo " 2. /root/remnashop"
         echo " 3. /opt/stacks/remnashop"
     fi
-    echo " 4. Указать свой путь"
+    echo "4. Show your path"
     echo ""
-    echo " 0. Назад"
+    echo "0. Back"
     echo ""
 
     local restore_path
     local path_choice
     while true; do
-        read -rp " ${GREEN}[?]${RESET} Выберите путь: " path_choice
+        read -rp "${GREEN}[?]${RESET} Select path:" path_choice
         case "$path_choice" in
         1)
-            if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
+            if [[ "$selected_bot_name" == "Bot from Jesus" ]]; then
                 restore_path="/opt/remnawave-telegram-shop"
-            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
+            elif [[ "$selected_bot_name" == "Bot from Machka" ]]; then
                 restore_path="/opt/remnawave-tg-shop"
             else
                 restore_path="/opt/remnashop"
@@ -419,9 +419,9 @@ restore_bot_backup() {
             break
             ;;
         2)
-            if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
+            if [[ "$selected_bot_name" == "Bot from Jesus" ]]; then
                 restore_path="/root/remnawave-telegram-shop"
-            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
+            elif [[ "$selected_bot_name" == "Bot from Machka" ]]; then
                 restore_path="/root/remnawave-tg-shop"
             else
                 restore_path="/root/remnashop"
@@ -429,9 +429,9 @@ restore_bot_backup() {
             break
             ;;
         3)
-            if [[ "$selected_bot_name" == "Бот от Иисуса" ]]; then
+            if [[ "$selected_bot_name" == "Bot from Jesus" ]]; then
                 restore_path="/opt/stacks/remnawave-telegram-shop"
-            elif [[ "$selected_bot_name" == "Бот от Мачки" ]]; then
+            elif [[ "$selected_bot_name" == "Bot from Machka" ]]; then
                 restore_path="/opt/stacks/remnawave-tg-shop"
             else
                 restore_path="/opt/stacks/remnashop"
@@ -440,34 +440,34 @@ restore_bot_backup() {
             ;;
         4)
             echo ""
-            print_message "INFO" "Введите полный путь для восстановления бота:"
-            read -rp " Путь: " custom_restore_path
+            print_message "INFO" "Enter the full path to restore the bot:"
+            read -rp "Path:" custom_restore_path
         
             if [[ -z "$custom_restore_path" ]]; then
-                print_message "ERROR" "Путь не может быть пустым."
+                print_message "ERROR" "The path cannot be empty."
                 echo ""
-                read -rp "Нажмите Enter, чтобы продолжить..."
+                read -rp "Press Enter to continue..."
                 continue
             fi
         
             if [[ ! "$custom_restore_path" = /* ]]; then
-                print_message "ERROR" "Путь должен быть абсолютным (начинаться с /)."
+                print_message "ERROR" "The path must be absolute (starting with /)."
                 echo ""
-                read -rp "Нажмите Enter, чтобы продолжить..."
+                read -rp "Press Enter to continue..."
                 continue
             fi
         
             custom_restore_path="${custom_restore_path%/}"
             restore_path="$custom_restore_path"
-            print_message "SUCCESS" "Установлен кастомный путь для восстановления: ${BOLD}${restore_path}${RESET}"
+            print_message "SUCCESS" "Custom recovery path set: ${BOLD}${restore_path}${RESET}"
             break
             ;;
         0)
-            print_message "INFO" "Восстановление бота отменено."
+            print_message "INFO" "Bot restoration cancelled."
             return 0
             ;;
         *)
-            print_message "ERROR" "Неверный ввод."
+            print_message "ERROR" "Invalid input."
             ;;
         esac
     done
@@ -476,48 +476,48 @@ restore_bot_backup() {
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
     
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя пользователя базы данных бота (по умолчанию postgres): ")" restore_bot_db_user
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Enter the bot database username (postgres by default):")" restore_bot_db_user
     restore_bot_db_user="${restore_bot_db_user:-postgres}"
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя базы данных бота (по умолчанию postgres): ")" restore_bot_db_name
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Enter the bot database name (postgres by default):")" restore_bot_db_name
     restore_bot_db_name="${restore_bot_db_name:-postgres}"
     echo ""
-    print_message "INFO" "Начало восстановления Telegram бота..."
+    print_message "INFO" "Start of Telegram bot recovery..."
     
     if [[ -d "$restore_path" ]]; then
-        print_message "INFO" "Директория ${BOLD}${restore_path}${RESET} существует. Останавливаем контейнеры и очищаем..."
+        print_message "INFO" "The directory ${BOLD}${restore_path}${RESET} exists. We stop the containers and clean..."
     
         if cd "$restore_path" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]]); then
-            print_message "INFO" "Остановка существующих контейнеров бота..."
-            docker compose down 2>/dev/null || print_message "WARN" "Не удалось остановить контейнеры (возможно, они уже остановлены)."
+            print_message "INFO" "Stopping existing bot containers..."
+            docker compose down 2>/dev/null || print_message "WARN" "The containers could not be stopped (they may have already been stopped)."
         else
-            print_message "INFO" "Docker Compose файл (.yml или .yaml) не найден, пропускаем остановку контейнеров."
+            print_message "INFO" "Docker Compose file (.yml or .yaml) not found, skip stopping containers."
         fi
     fi
         
     cd /
         
-    print_message "INFO" "Удаление старой директории..."
+    print_message "INFO" "Deleting old directory..."
     if [[ -d "$restore_path" ]]; then
         if ! rm -rf "$restore_path"; then
-            print_message "ERROR" "Не удалось удалить директорию ${BOLD}${restore_path}${RESET}."
+            print_message "ERROR" "Failed to delete directory ${BOLD}${restore_path}${RESET}."
             return 1
         fi
-        print_message "SUCCESS" "Старая директория удалена."
+        print_message "SUCCESS" "The old directory has been deleted."
     else
-        print_message "INFO" "Директория ${BOLD}${restore_path}${RESET} не существует. Это чистая установка."
+        print_message "INFO" "The directory ${BOLD}${restore_path}${RESET} does not exist. This is a clean install."
     fi
     
-    print_message "INFO" "Создание новой директории..."
+    print_message "INFO" "Creating a new directory..."
     if ! mkdir -p "$restore_path"; then
-        print_message "ERROR" "Не удалось создать директорию ${BOLD}${restore_path}${RESET}."
+        print_message "ERROR" "Failed to create directory ${BOLD}${restore_path}${RESET}."
         return 1
     fi
-    print_message "SUCCESS" "Новая директория создана."
+    print_message "SUCCESS" "A new directory has been created."
     echo ""
     
     if [[ -n "$BOT_DIR_ARCHIVE" ]]; then
-        print_message "INFO" "Восстановление директории бота из архива..."
+        print_message "INFO" "Restoring the bot directory from the archive..."
         local temp_extract_dir="$BACKUP_DIR/bot_extract_temp_$$"
         mkdir -p "$temp_extract_dir"
         
@@ -526,66 +526,66 @@ restore_bot_backup() {
 
             if [[ -n "$extracted_dir" && -d "$extracted_dir" ]]; then
                 if cp -rf "$extracted_dir"/. "$restore_path/" 2>/dev/null; then
-                    print_message "SUCCESS" "Файлы директории бота восстановлены (папка: $(basename "$extracted_dir"))."
+                    print_message "SUCCESS" "The bot directory files have been restored (folder: $(basename"$extracted_dir"))."
                 else
-                    print_message "ERROR" "Ошибка при копировании файлов бота."
+                    print_message "ERROR" "Error when copying bot files."
                     rm -rf "$temp_extract_dir"
                     return 1
                 fi
             else
-                print_message "ERROR" "Не удалось найти директорию с файлами бота в архиве."
+                print_message "ERROR" "Could not find the directory with the bot files in the archive."
                 rm -rf "$temp_extract_dir"
                 return 1
             fi
         else
-            print_message "ERROR" "Ошибка при распаковке архива директории бота."
+            print_message "ERROR" "Error when unpacking the bot directory archive."
             rm -rf "$temp_extract_dir"
             return 1
         fi
         rm -rf "$temp_extract_dir"
     else
-        print_message "WARN" "Архив директории бота не найден в бэкапе."
+        print_message "WARN" "The bot directory archive was not found in the backup."
         return 1
     fi
     
-    print_message "INFO" "Проверка и удаление старых томов БД..."
+    print_message "INFO" "Checking and deleting old database volumes..."
     if docker volume ls -q | grep -Fxq "$BOT_VOLUME_NAME"; then
         local containers_using_volume
         containers_using_volume=$(docker ps -aq --filter volume="$BOT_VOLUME_NAME")
     
         if [[ -n "$containers_using_volume" ]]; then
-            print_message "INFO" "Найдены контейнеры, использующие том $BOT_VOLUME_NAME. Удаляем..."
+            print_message "INFO" "Found containers using volume $BOT_VOLUME_NAME. Let's delete..."
             docker rm -f $containers_using_volume >/dev/null 2>&1
         fi
     
         if docker volume rm "$BOT_VOLUME_NAME" >/dev/null 2>&1; then
-            print_message "SUCCESS" "Старый том БД $BOT_VOLUME_NAME удален."
+            print_message "SUCCESS" "The old database volume $BOT_VOLUME_NAME has been deleted."
         else
-            print_message "WARN" "Не удалось удалить том $BOT_VOLUME_NAME."
+            print_message "WARN" "Failed to delete volume $BOT_VOLUME_NAME."
         fi
     else
-        print_message "INFO" "Старых томов БД не найдено."
+        print_message "INFO" "No old database volumes were found."
     fi
     echo ""
     
     if ! cd "$restore_path"; then
-        print_message "ERROR" "Не удалось перейти в восстановленную директорию ${BOLD}${restore_path}${RESET}."
+        print_message "ERROR" "Failed to navigate to restored directory ${BOLD}${restore_path}${RESET}."
         return 1
     fi
     
     if [[ ! -f "docker-compose.yml" && ! -f "docker-compose.yaml" ]]; then
-    print_message "ERROR" "Файл docker-compose.yml или docker-compose.yaml не найден в восстановленной директории."
+    print_message "ERROR" "The file docker-compose.yml or docker-compose.yaml was not found in the restored directory."
     return 1
     fi
     
-    print_message "INFO" "Запуск контейнера БД бота..."
+    print_message "INFO" "Launching the bot database container..."
     if ! docker compose up -d "$BOT_SERVICE_NAME"; then
-        print_message "ERROR" "Не удалось запустить контейнер БД бота."
+        print_message "ERROR" "The bot database container failed to start."
         return 1
     fi
     
     echo ""
-    print_message "INFO" "Ожидание готовности БД бота..."
+    print_message "INFO" "Waiting for the bot database to be ready..."
     local wait_count=0
     local max_wait=60
     
@@ -595,46 +595,46 @@ restore_bot_backup() {
         wait_count=$((wait_count + 1))
         if [ $wait_count -gt $max_wait ]; then
             echo ""
-            print_message "ERROR" "Превышено время ожидания готовности БД бота."
+            print_message "ERROR" "The wait time for the bot database to be ready has been exceeded."
             return 1
         fi
     done
     echo ""
-    print_message "SUCCESS" "БД бота готова к работе."
+    print_message "SUCCESS" "The bot's database is ready for use."
     
     if [[ -n "$BOT_DUMP_FILE" ]]; then
-        print_message "INFO" "Восстановление БД бота из дампа..."
+        print_message "INFO" "Restoring a bot's database from a dump..."
         local BOT_DUMP_UNCOMPRESSED="${BOT_DUMP_FILE%.gz}"
         
         if ! gunzip "$BOT_DUMP_FILE"; then
-            print_message "ERROR" "Не удалось распаковать дамп БД бота."
+            print_message "ERROR" "Failed to unpack the bot database dump."
             return 1
         fi
         
         mkdir -p "$temp_restore_dir"
 
         if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
-            print_message "ERROR" "Ошибка при восстановлении БД бота."
+            print_message "ERROR" "Error when restoring the bot database."
             echo ""
             if [[ -f "$temp_restore_dir/restore_errors.log" ]]; then
-                print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
+                print_message "WARN" "${YELLOW}Restore error log:${RESET}"
                 cat "$temp_restore_dir/restore_errors.log"
             fi
             [[ -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
             echo ""
-            read -rp "Нажмите Enter для возврата в меню..."
+            read -rp "Press Enter to return to the menu..."
             return 1
         fi
 
-        print_message "SUCCESS" "БД бота успешно восстановлена."
+        print_message "SUCCESS" "The bot database has been successfully restored."
     else
-        print_message "WARN" "Дамп БД бота не найден в архиве."
+        print_message "WARN" "The bot database dump was not found in the archive."
     fi
     
     echo ""
-    print_message "INFO" "Запуск остальных контейнеров бота..."
+    print_message "INFO" "Launching the remaining bot containers..."
     if ! docker compose up -d; then
-        print_message "ERROR" "Не удалось запустить все контейнеры бота."
+        print_message "ERROR" "Failed to start all bot containers."
         return 1
     fi
     
@@ -643,7 +643,7 @@ restore_bot_backup() {
 }
 
 save_config() {
-    print_message "INFO" "Сохранение конфигурации в ${BOLD}${CONFIG_FILE}${RESET}..."
+    print_message "INFO" "Saving configuration to ${BOLD}${CONFIG_FILE}${RESET}..."
     cat > "$CONFIG_FILE" <<EOF
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
@@ -662,13 +662,13 @@ BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
 BOT_BACKUP_DB_USER="$BOT_BACKUP_DB_USER"
 SKIP_PANEL_BACKUP="$SKIP_PANEL_BACKUP"
 EOF
-    chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
-    print_message "SUCCESS" "Конфигурация сохранена."
+    chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Failed to set permissions (600) for ${BOLD}${CONFIG_FILE}${RESET}. Check permissions."; exit 1; }
+    print_message "SUCCESS" "The configuration has been saved."
 }
 
 load_or_create_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
-        print_message "INFO" "Загрузка конфигурации..."
+        print_message "INFO" "Loading configuration..."
         source "$CONFIG_FILE"
         echo ""
 
@@ -682,82 +682,82 @@ load_or_create_config() {
         local config_updated=false
 
         if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-            print_message "WARN" "В файле конфигурации отсутствуют необходимые переменные для Telegram."
-            print_message "ACTION" "Пожалуйста, введите недостающие данные для Telegram (обязательно):"
+            print_message "WARN" "The configuration file is missing necessary variables for Telegram."
+            print_message "ACTION" "Please enter the missing data for Telegram (required):"
             echo ""
-            print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
-            [[ -z "$BOT_TOKEN" ]] && read -rp "    Введите API Token: " BOT_TOKEN
+            print_message "INFO" "Create a Telegram bot in ${CYAN}@BotFather${RESET} and get an API Token"
+            [[ -z "$BOT_TOKEN" ]] && read -rp "Enter API Token:" BOT_TOKEN
             echo ""
-            print_message "INFO" "Введите Chat ID (для отправки в группу) или свой Telegram ID (для прямой отправки в бота)"
-            echo -e "       Chat ID/Telegram ID можно узнать у этого бота ${CYAN}@username_to_id_bot${RESET}"
-            [[ -z "$CHAT_ID" ]] && read -rp "    Введите ID: " CHAT_ID
+            print_message "INFO" "Enter Chat ID (to send to the group) or your Telegram ID (to send directly to the bot)"
+            echo -e "Chat ID/Telegram ID can be found from this bot ${CYAN}@username_to_id_bot${RESET}"
+            [[ -z "$CHAT_ID" ]] && read -rp "Enter ID:" CHAT_ID
             echo ""
-            print_message "INFO" "Опционально: для отправки в определенный топик группы, введите ID топика (Message Thread ID)"
-            echo -e "       Оставьте пустым для общего потока или отправки напрямую в бота"
-            read -rp "    Введите Message Thread ID: " TG_MESSAGE_THREAD_ID
+            print_message "INFO" "Optional: to send to a specific group topic, enter the topic ID (Message Thread ID)"
+            echo -e "Leave blank for general thread or sending directly to bot"
+            read -rp "Enter Message Thread ID:" TG_MESSAGE_THREAD_ID
             echo ""
             config_updated=true
         fi
 
         if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$DB_USER" ]]; then
-            print_message "INFO" "Введите имя пользователя БД панели (по умолчанию postgres):"
-            read -rp "    Ввод: " input_db_user
+            print_message "INFO" "Enter the panel database username (postgres by default):"
+            read -rp "Input:" input_db_user
             DB_USER=${input_db_user:-postgres}
             config_updated=true
             echo ""
         fi
         
         if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$REMNALABS_ROOT_DIR" ]]; then
-            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
+            print_message "ACTION" "Where is/is your Remnawave panel installed?"
             echo " 1. /opt/remnawave"
             echo " 2. /root/remnawave"
             echo " 3. /opt/stacks/remnawave"
-            echo " 4. Указать свой путь"
+            echo "4. Show your path"
             echo ""
 
             local remnawave_path_choice
             while true; do
-                read -rp " ${GREEN}[?]${RESET} Выберите вариант: " remnawave_path_choice
+                read -rp "${GREEN}[?]${RESET} Select an option:" remnawave_path_choice
                 case "$remnawave_path_choice" in
                 1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
                 2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
                 3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
                 4) 
                     echo ""
-                    print_message "INFO" "Введите полный путь к директории панели Remnawave:"
-                    read -rp " Путь: " custom_remnawave_path
+                    print_message "INFO" "Enter the full path to the Remnawave panel directory:"
+                    read -rp "Path:" custom_remnawave_path
     
                     if [[ -z "$custom_remnawave_path" ]]; then
-                        print_message "ERROR" "Путь не может быть пустым."
+                        print_message "ERROR" "The path cannot be empty."
                         echo ""
-                        read -rp "Нажмите Enter, чтобы продолжить..."
+                        read -rp "Press Enter to continue..."
                         continue
                     fi
     
                     if [[ ! "$custom_remnawave_path" = /* ]]; then
-                        print_message "ERROR" "Путь должен быть абсолютным (начинаться с /)."
+                        print_message "ERROR" "The path must be absolute (starting with /)."
                         echo ""
-                        read -rp "Нажмите Enter, чтобы продолжить..."
+                        read -rp "Press Enter to continue..."
                         continue
                     fi
     
                     custom_remnawave_path="${custom_remnawave_path%/}"
     
                     if [[ ! -d "$custom_remnawave_path" ]]; then
-                        print_message "WARN" "Директория ${BOLD}${custom_remnawave_path}${RESET} не существует."
-                        read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_path
+                        print_message "WARN" "The directory ${BOLD}${custom_remnawave_path}${RESET} does not exist."
+                        read -rp "$(echo -e "${GREEN}[?]${RESET} Continue with this path? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:")" confirm_custom_path
                         if [[ "$confirm_custom_path" != "y" ]]; then
                             echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
+                            read -rp "Press Enter to continue..."
                             continue
                         fi
                     fi
     
                     REMNALABS_ROOT_DIR="$custom_remnawave_path"
-                    print_message "SUCCESS" "Установлен кастомный путь: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                    print_message "SUCCESS" "Custom path set: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                     break 
                     ;;
-                *) print_message "ERROR" "Неверный ввод." ;;
+                *) print_message "ERROR" "Invalid input." ;;
                 esac
             done
             config_updated=true
@@ -766,35 +766,35 @@ load_or_create_config() {
 
         if [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-                print_message "WARN" "В файле конфигурации обнаружены неполные данные для Google Drive."
-                print_message "WARN" "Способ отправки будет изменён на ${BOLD}Telegram${RESET}."
+                print_message "WARN" "Incomplete data for Google Drive was found in the configuration file."
+                print_message "WARN" "The sending method will be changed to ${BOLD}Telegram${RESET}."
                 UPLOAD_METHOD="telegram"
                 config_updated=true
             fi
         fi
 
         if [[ "$UPLOAD_METHOD" == "google_drive" && ( -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ) ]]; then
-            print_message "WARN" "В файле конфигурации отсутствуют необходимые переменные для Google Drive."
-            print_message "ACTION" "Пожалуйста, введите недостающие данные для Google Drive:"
+            print_message "WARN" "The configuration file is missing required variables for Google Drive."
+            print_message "ACTION" "Please enter the missing data for Google Drive:"
             echo ""
-            echo "Если у вас нет Client ID и Client Secret токенов"
+            echo "If you do not have Client ID and Client Secret tokens"
             local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-            print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
+            print_message "LINK" "Check out this guide: ${CYAN}${guide_url}${RESET}"
             echo ""
-            [[ -z "$GD_CLIENT_ID" ]] && read -rp "    Введите Google Client ID: " GD_CLIENT_ID
-            [[ -z "$GD_CLIENT_SECRET" ]] && read -rp "    Введите Google Client Secret: " GD_CLIENT_SECRET
+            [[ -z "$GD_CLIENT_ID" ]] && read -rp "Enter Google Client ID:" GD_CLIENT_ID
+            [[ -z "$GD_CLIENT_SECRET" ]] && read -rp "Enter Google Client Secret:" GD_CLIENT_SECRET
             clear
             
             if [[ -z "$GD_REFRESH_TOKEN" ]]; then
-                print_message "WARN" "Для получения Refresh Token необходимо пройти авторизацию в браузере."
-                print_message "INFO" "Откройте следующую ссылку в браузере, авторизуйтесь и скопируйте код:"
+                print_message "WARN" "To receive a Refresh Token, you must log in to your browser."
+                print_message "INFO" "Open the following link in your browser, log in and copy the code:"
                 echo ""
                 local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
                 print_message "INFO" "${CYAN}${auth_url}${RESET}"
                 echo ""
-                read -rp "    Введите код из браузера: " AUTH_CODE
+                read -rp "Enter the code from the browser:" AUTH_CODE
                 
-                print_message "INFO" "Получение Refresh Token..."
+                print_message "INFO" "Receiving Refresh Token..."
                 local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
                     -d client_id="$GD_CLIENT_ID" \
                     -d client_secret="$GD_CLIENT_SECRET" \
@@ -805,57 +805,57 @@ load_or_create_config() {
                 GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
                 
                 if [[ -z "$GD_REFRESH_TOKEN" || "$GD_REFRESH_TOKEN" == "null" ]]; then
-                    print_message "ERROR" "Не удалось получить Refresh Token. Проверьте Client ID, Client Secret и введенный 'Code'."
-                    print_message "WARN" "Так как настройка Google Drive не завершена, способ отправки будет изменён на ${BOLD}Telegram${RESET}."
+                    print_message "ERROR" "Failed to obtain Refresh Token. Check Client ID, Client Secret, and the entered authorization code."
+                    print_message "WARN" "Since the Google Drive setup is not completed, the sending method will be changed to ${BOLD}Telegram${RESET}."
                     UPLOAD_METHOD="telegram"
                     config_updated=true
                 fi
             fi
             echo ""
-            echo "    📁 Чтобы указать папку Google Drive:"
-            echo "    1. Создайте и откройте нужную папку в браузере."
-            echo "    2. Посмотрите на ссылку в адресной строке,она выглядит так:"
+            echo "📁 To specify the Google Drive folder:"
+            echo "1. Create and open the desired folder in the browser."
+            echo "2. Look at the link in the address bar, it looks like this:"
             echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-            echo "    3. Скопируйте часть после /folders/ — это и есть Folder ID:"
-            echo "    4. Если оставить поле пустым — бекап будет отправлен в корневую папку Google Drive."
+            echo "3. Copy the part after /folders/ - this is the Folder ID:"
+            echo "4. If you leave the field empty, the backup will be sent to the root folder of Google Drive."
             echo ""
-            read -rp "    Введите Google Drive Folder ID (оставьте пустым для корневой папки): " GD_FOLDER_ID
+            read -rp "Enter Google Drive Folder ID (leave blank for root folder):" GD_FOLDER_ID
             config_updated=true
         fi
 
         if $config_updated; then
             save_config
         else
-            print_message "SUCCESS" "Конфигурация успешно загружена из ${BOLD}${CONFIG_FILE}${RESET}."
+            print_message "SUCCESS" "The configuration was successfully loaded from ${BOLD}${CONFIG_FILE}${RESET}."
         fi
 
     else
         if [[ "$SCRIPT_RUN_PATH" != "$SCRIPT_PATH" ]]; then
-            print_message "INFO" "Конфигурация не найдена. Скрипт запущен из временного расположения."
-            print_message "INFO" "Перемещаем скрипт в основной каталог установки: ${BOLD}${SCRIPT_PATH}${RESET}..."
-            mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Не удалось создать каталог установки ${BOLD}${INSTALL_DIR}${RESET}."; exit 1; }
-            mkdir -p "$BACKUP_DIR" || { print_message "ERROR" "Не удалось создать каталог для бэкапов ${BOLD}${BACKUP_DIR}${RESET}."; exit 1; }
+            print_message "INFO" "Configuration not found. The script was launched from a temporary location."
+            print_message "INFO" "Move the script to the main installation directory: ${BOLD}${SCRIPT_PATH}${RESET}..."
+            mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Failed to create installation directory ${BOLD}${INSTALL_DIR}${RESET}."; exit 1; }
+            mkdir -p "$BACKUP_DIR" || { print_message "ERROR" "Failed to create backup directory ${BOLD}${BACKUP_DIR}${RESET}."; exit 1; }
 
             if mv "$SCRIPT_RUN_PATH" "$SCRIPT_PATH"; then
                 chmod +x "$SCRIPT_PATH"
                 clear
-                print_message "SUCCESS" "Скрипт успешно перемещен в ${BOLD}${SCRIPT_PATH}${RESET}."
-                print_message "ACTION" "Перезапускаем скрипт из нового расположения для завершения настройки."
+                print_message "SUCCESS" "The script was successfully moved to ${BOLD}${SCRIPT_PATH}${RESET}."
+                print_message "ACTION" "Restart the script from the new location to complete the setup."
                 exec "$SCRIPT_PATH" "$@"
                 exit 0
             else
-                print_message "ERROR" "Не удалось переместить скрипт в ${BOLD}${SCRIPT_PATH}${RESET}."
+                print_message "ERROR" "Failed to move script to ${BOLD}${SCRIPT_PATH}${RESET}."
                 exit 1
             fi
         else
-            print_message "INFO" "Конфигурация не найдена, создаем новую..."
+            print_message "INFO" "Configuration not found, create a new one..."
             echo ""
 
-            print_message "ACTION" "Выберите режим работы скрипта:"
-            echo " 1. Полный (Панель Remnawave + Бот опционально)"
-            echo " 2. Только Бот (если панель установлена на другом сервере)"
+            print_message "ACTION" "Select the script mode:"
+            echo "1. Full (Remnawave Panel + Bot optional)"
+            echo "2. Bot only (if the panel is installed on another server)"
             echo ""
-            read -rp " ${GREEN}[?]${RESET} Ваш выбор: " main_mode_choice
+            read -rp "${GREEN}[?]${RESET} Your choice:" main_mode_choice
             
             if [[ "$main_mode_choice" == "2" ]]; then
                 SKIP_PANEL_BACKUP="true"
@@ -865,49 +865,49 @@ load_or_create_config() {
             fi
             echo ""
 
-            print_message "INFO" "Настройка уведомлений Telegram:"
-            print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
-            read -rp "    Введите API Token: " BOT_TOKEN
+            print_message "INFO" "Setting up Telegram notifications:"
+            print_message "INFO" "Create a Telegram bot in ${CYAN}@BotFather${RESET} and get an API Token"
+            read -rp "Enter API Token:" BOT_TOKEN
             echo ""
-            print_message "INFO" "Введите Chat ID (для отправки в группу) или свой Telegram ID (для прямой отправки в бота)"
-            echo -e "       Chat ID/Telegram ID можно узнать у этого бота ${CYAN}@username_to_id_bot${RESET}"
-            read -rp "    Введите ID: " CHAT_ID
+            print_message "INFO" "Enter Chat ID (to send to the group) or your Telegram ID (to send directly to the bot)"
+            echo -e "Chat ID/Telegram ID can be found from this bot ${CYAN}@username_to_id_bot${RESET}"
+            read -rp "Enter ID:" CHAT_ID
             echo ""
-            print_message "INFO" "Опционально: для отправки в определенный топик группы, введите ID топика (Message Thread ID)"
-            echo -e "       Оставьте пустым для общего потока или отправки напрямую в бота"
-            read -rp "    Введите Message Thread ID: " TG_MESSAGE_THREAD_ID
+            print_message "INFO" "Optional: to send to a specific group topic, enter the topic ID (Message Thread ID)"
+            echo -e "Leave blank for general thread or sending directly to bot"
+            read -rp "Enter Message Thread ID:" TG_MESSAGE_THREAD_ID
             echo ""
 
             if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
-                print_message "INFO" "Введите имя пользователя БД (по умолчанию postgres):"
-                read -rp "    Ввод: " input_db_user
+                print_message "INFO" "Enter your database username (postgres by default):"
+                read -rp "Input:" input_db_user
                 DB_USER=${input_db_user:-postgres}
                 echo ""
 
-                print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
+                print_message "ACTION" "Where is/is your Remnawave panel installed?"
                 echo " 1. /opt/remnawave"
                 echo " 2. /root/remnawave"
                 echo " 3. /opt/stacks/remnawave"
-                echo " 4. Указать свой путь"
+                echo "4. Show your path"
                 echo ""
 
                 local remnawave_path_choice
                 while true; do
-                    read -rp " ${GREEN}[?]${RESET} Выберите вариант: " remnawave_path_choice
+                    read -rp "${GREEN}[?]${RESET} Select an option:" remnawave_path_choice
                     case "$remnawave_path_choice" in
                     1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
                     2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
                     3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
                     4) 
                         echo ""
-                        print_message "INFO" "Введите полный путь к директории панели Remnawave:"
-                        read -rp " Путь: " custom_remnawave_path
+                        print_message "INFO" "Enter the full path to the Remnawave panel directory:"
+                        read -rp "Path:" custom_remnawave_path
                         if [[ -n "$custom_remnawave_path" ]]; then
                             REMNALABS_ROOT_DIR="${custom_remnawave_path%/}"
                             break
                         fi
                         ;;
-                    *) print_message "ERROR" "Неверный ввод." ;;
+                    *) print_message "ERROR" "Invalid input." ;;
                     esac
                 done
             fi
@@ -915,12 +915,12 @@ load_or_create_config() {
             mkdir -p "$INSTALL_DIR"
             mkdir -p "$BACKUP_DIR"
             save_config
-            print_message "SUCCESS" "Новая конфигурация сохранена в ${BOLD}${CONFIG_FILE}${RESET}"
+            print_message "SUCCESS" "The new configuration is saved in ${BOLD}${CONFIG_FILE}${RESET}"
         fi
     fi
 
     if [[ "$SKIP_PANEL_BACKUP" != "true" && ! -d "$REMNALABS_ROOT_DIR" ]]; then
-        print_message "ERROR" "Директория Remnawave не найдена по пути $REMNALABS_ROOT_DIR. Проверьте настройки в $CONFIG_FILE"
+        print_message "ERROR" "The Remnawave directory was not found at $REMNALABS_ROOT_DIR. Check the settings in $CONFIG_FILE"
         exit 1
     fi
     echo ""
@@ -954,7 +954,7 @@ get_remnawave_version() {
     version_output=$(docker exec remnawave sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json
  2>/dev/null)
     if [[ -z "$version_output" ]]; then
-        echo "не определена"
+        echo "not defined"
     else
         echo "$version_output"
     fi
@@ -967,7 +967,7 @@ send_telegram_message() {
     escaped_message=$(escape_markdown_v2 "$message")
 
     if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-        print_message "ERROR" "Telegram BOT_TOKEN или CHAT_ID не настроены. Сообщение не отправлено."
+        print_message "ERROR" "Telegram BOT_TOKEN or CHAT_ID is not configured. Message not sent."
         return 1
     fi
 
@@ -988,8 +988,8 @@ send_telegram_message() {
     if [[ "$http_code" -eq 200 ]]; then
         return 0
     else
-        echo -e "${RED}❌ Ошибка отправки сообщения в Telegram. Код: ${BOLD}$http_code${RESET}"
-        echo -e "Ответ от Telegram: ${body}"
+        echo -e "${RED}❌ Error sending message to Telegram. Code: ${BOLD}$http_code${RESET}"
+        echo -e "Reply from Telegram: ${body}"
         return 1
     fi
 }
@@ -1002,7 +1002,7 @@ send_telegram_document() {
     escaped_caption=$(escape_markdown_v2 "$caption")
 
     if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-        print_message "ERROR" "Telegram BOT_TOKEN или CHAT_ID не настроены. Документ не отправлен."
+        print_message "ERROR" "Telegram BOT_TOKEN or CHAT_ID is not configured. The document has not been sent."
         return 1
     fi
 
@@ -1024,7 +1024,7 @@ send_telegram_document() {
     local curl_status=$?
 
     if [ $curl_status -ne 0 ]; then
-        echo -e "${RED}❌ Ошибка ${BOLD}CURL${RESET} при отправке документа в Telegram. Код выхода: ${BOLD}$curl_status${RESET}. Проверьте сетевое соединение.${RESET}"
+        echo -e "${RED}❌ ${BOLD}CURL${RESET} error when sending a document to Telegram. Exit code: ${BOLD}$curl_status${RESET}. Check your network connection.${RESET}"
         return 1
     fi
 
@@ -1033,14 +1033,14 @@ send_telegram_document() {
     if [[ "$http_code" == "200" ]]; then
         return 0
     else
-        echo -e "${RED}❌ Telegram API вернул ошибку HTTP. Код: ${BOLD}$http_code${RESET}. Ответ: ${BOLD}$api_response${RESET}. Возможно, файл слишком большой или ${BOLD}BOT_TOKEN${RESET}/${BOLD}CHAT_ID${RESET} неверны.${RESET}"
+        echo -e "${RED}❌ Telegram API returned HTTP error. Code: ${BOLD}$http_code${RESET}. Response: ${BOLD}$api_response${RESET}. The file may be too large or ${BOLD}BOT_TOKEN${RESET}/${BOLD}CHAT_ID${RESET} are incorrect.${RESET}"
         return 1
     fi
 }
 
 get_google_access_token() {
     if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-        print_message "ERROR" "Google Drive Client ID, Client Secret или Refresh Token не настроены."
+        print_message "ERROR" "Google Drive Client ID, Client Secret, or Refresh Token are not configured."
         return 1
     fi
 
@@ -1055,8 +1055,8 @@ get_google_access_token() {
 
     if [[ -z "$access_token" || "$access_token" == "null" ]]; then
         local error_msg=$(echo "$token_response" | jq -r .error_description 2>/dev/null)
-        print_message "ERROR" "Не удалось получить Access Token для Google Drive. Возможно, Refresh Token устарел или недействителен. Ошибка: ${error_msg:-Unknown error}."
-        print_message "ACTION" "Пожалуйста, перенастройте Google Drive в меню 'Настроить способ отправки'."
+        print_message "ERROR" "Failed to obtain Access Token for Google Drive. The Refresh Token may be outdated or invalid. Error: ${error_msg:-Unknown error}."
+        print_message "ACTION" "Please reconfigure Google Drive in the "Set up sending method" menu."
         return 1
     fi
     echo "$access_token"
@@ -1069,7 +1069,7 @@ send_google_drive_document() {
     local access_token=$(get_google_access_token)
 
     if [[ -z "$access_token" ]]; then
-        print_message "ERROR" "Не удалось отправить бэкап в Google Drive: не получен Access Token."
+        print_message "ERROR" "Failed to send backup to Google Drive: Access Token not received."
         return 1
     fi
 
@@ -1100,13 +1100,13 @@ send_google_drive_document() {
     if [[ -n "$file_id" && "$file_id" != "null" ]]; then
         return 0
     else
-        print_message "ERROR" "Ошибка при загрузке в Google Drive. Код: ${error_code:-Unknown}. Сообщение: ${error_message:-Unknown error}. Полный ответ API: ${response}"
+        print_message "ERROR" "Error uploading to Google Drive. Code: ${error_code:-Unknown}. Message: ${error_message:-Unknown error}. Full API response: ${response}"
         return 1
     fi
 }
 
 create_backup() {
-    print_message "INFO" "Начинаю процесс создания резервной копии..."
+    print_message "INFO" "I'm starting the process of creating a backup..."
     echo ""
     
     REMNAWAVE_VERSION=$(get_remnawave_version)
@@ -1115,48 +1115,48 @@ create_backup() {
     BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
     
     mkdir -p "$BACKUP_DIR" || { 
-        echo -e "${RED}❌ Ошибка: Не удалось создать каталог для бэкапов. Проверьте права доступа.${RESET}"
-        send_telegram_message "❌ Ошибка: Не удалось создать каталог бэкапов ${BOLD}$BACKUP_DIR${RESET}." "None"
+        echo -e "${RED}❌ Error: Failed to create backup directory. Check permissions.${RESET}"
+        send_telegram_message "❌ Error: Failed to create backup directory ${BOLD}$BACKUP_DIR${RESET}." "None"
         exit 1
     }
     
     BACKUP_ITEMS=()
     
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-        print_message "INFO" "Пропускаю бэкап панели Remnawave."
+        print_message "INFO" "I'm skipping the Remnawave panel backup."
     else
         if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
-            echo -e "${RED}❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Невозможно создать бэкап базы данных.${RESET}"
-            local error_msg="❌ Ошибка: Контейнер ${BOLD}'remnawave-db'${RESET} не найден или не запущен. Не удалось создать бэкап."
+            echo -e "${RED}❌ Error: Container ${BOLD}'remnawave-db'${RESET} not found or not running. Cannot create a database backup.${RESET}"
+            local error_msg="❌ Error: Container ${BOLD}'remnawave-db'${RESET} not found or not running. Failed to create backup."
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
                 send_telegram_message "$error_msg" "None"
             elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-                print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с контейнером DB."
+                print_message "ERROR" "Uploading to Google Drive is not possible due to an error with the DB container."
             fi
             exit 1
         fi
         
-        print_message "INFO" "Создание PostgreSQL дампа и сжатие в файл..."
+        print_message "INFO" "Creating a PostgreSQL dump and compressing it into a file..."
         if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
             STATUS=$?
-            echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}$STATUS${RESET}. Проверьте имя пользователя БД и доступ к контейнеру.${RESET}"
-            local error_msg="❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}${STATUS}${RESET}"
+            echo -e "${RED}❌ Error creating PostgreSQL dump. Exit code: ${BOLD}$STATUS${RESET}. Check your database username and container access.${RESET}"
+            local error_msg="❌ Error creating PostgreSQL dump. Exit code: ${BOLD}${STATUS}${RESET}"
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
                 send_telegram_message "$error_msg" "None"
             elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-                print_message "ERROR" "Отправка в Google Drive невозможна из-за ошибки с дампом DB."
+                print_message "ERROR" "Uploading to Google Drive is not possible due to an error with the DB dump."
             fi
             exit $STATUS
         fi
         
-        print_message "SUCCESS" "Дамп PostgreSQL успешно создан."
+        print_message "SUCCESS" "The PostgreSQL dump has been created successfully."
         echo ""
         
-        print_message "INFO" "Архивирование директории Remnawave..."
+        print_message "INFO" "Archiving the Remnawave directory..."
         REMNAWAVE_DIR_ARCHIVE="remnawave_dir_${TIMESTAMP}.tar.gz"
         
         if [ -d "$REMNALABS_ROOT_DIR" ]; then
-            print_message "INFO" "Архивирование директории ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
+            print_message "INFO" "Archiving the directory ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
             
             local exclude_args=""
             for pattern in $BACKUP_EXCLUDE_PATTERNS; do
@@ -1164,19 +1164,19 @@ create_backup() {
             done
             
             if eval "tar -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'"; then
-                print_message "SUCCESS" "Директория Remnawave успешно заархивирована."
+                print_message "SUCCESS" "The Remnawave directory has been successfully archived."
                 BACKUP_ITEMS=("$BACKUP_FILE_DB" "$REMNAWAVE_DIR_ARCHIVE")
             else
                 STATUS=$?
-                echo -e "${RED}❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
-                local error_msg="❌ Ошибка при архивировании директории Remnawave. Код выхода: ${BOLD}${STATUS}${RESET}"
+                echo -e "${RED}❌ Error when archiving the Remnawave directory. Exit code: ${BOLD}$STATUS${RESET}.${RESET}"
+                local error_msg="❌ Error when archiving the Remnawave directory. Exit code: ${BOLD}${STATUS}${RESET}"
                 if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
                     send_telegram_message "$error_msg" "None"
                 fi
                 exit $STATUS
             fi
         else
-            print_message "ERROR" "Директория ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не найдена!"
+            print_message "ERROR" "Directory ${BOLD}${REMNALABS_ROOT_DIR}${RESET} not found!"
             exit 1
         fi
     fi
@@ -1186,88 +1186,88 @@ create_backup() {
     create_bot_backup
     
     if [[ ${#BACKUP_ITEMS[@]} -eq 0 ]]; then
-        print_message "ERROR" "Нет данных для бэкапа! Включите бэкап панели или бота."
+        print_message "ERROR" "No data for backup! Enable backup of the panel or bot."
         exit 1
     fi
     
     if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}"; then
         STATUS=$?
-        echo -e "${RED}❌ Ошибка при создании итогового архива бэкапа. Код выхода: ${BOLD}$STATUS${RESET}.${RESET}"
-        local error_msg="❌ Ошибка при создании итогового архива бэкапа. Код выхода: ${BOLD}${STATUS}${RESET}"
+        echo -e "${RED}❌ Error when creating the final backup archive. Exit code: ${BOLD}$STATUS${RESET}.${RESET}"
+        local error_msg="❌ Error when creating the final backup archive. Exit code: ${BOLD}${STATUS}${RESET}"
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
             send_telegram_message "$error_msg" "None"
         fi
         exit $STATUS
     fi
     
-    print_message "SUCCESS" "Итоговый архив бэкапа успешно создан: ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}"
+    print_message "SUCCESS" "The final backup archive was successfully created: ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}"
     echo ""
     
-    print_message "INFO" "Очистка промежуточных файлов бэкапа..."
+    print_message "INFO" "Cleaning intermediate backup files..."
     for item in "${BACKUP_ITEMS[@]}"; do
         rm -f "$BACKUP_DIR/$item"
     done
-    print_message "SUCCESS" "Промежуточные файлы удалены."
+    print_message "SUCCESS" "Intermediate files have been deleted."
     echo ""
     
-    print_message "INFO" "Отправка бэкапа (${UPLOAD_METHOD})..."
+    print_message "INFO" "Sending backup (${UPLOAD_METHOD})..."
     
     local DATE=$(date +'%Y-%m-%d %H:%M:%S')
     local backup_size=$(du -h "$BACKUP_DIR/$BACKUP_FILE_FINAL" | awk '{print $1}')
     
     local backup_info=""
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-        backup_info=$'\n🤖 *Только Telegram бот*'
+        backup_info=$'\n🤖 *Telegram bot only*'
     elif [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🤖 *+ Telegram бот*'
+        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🤖 *+ Telegram bot*'
     else
-        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🖥️ *Только панель*'
+        backup_info=$'\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"$'\n🖥️ *Panel only*'
     fi
 
-    local caption_text=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Бэкап успешно создан*'"${backup_info}"$'\n📁 *БД + директория*\n📏 *Размер:* '"${backup_size}"$'\n📅 *Дата:* '"${DATE}"
+    local caption_text=$'💾 #backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *Backup successfully created*'"${backup_info}"$'\n📁 *DB + directory*\n📏 *Size:*'"${backup_size}"$'\n📅 *Date:*'"${DATE}"
     local backup_size=$(du -h "$BACKUP_DIR/$BACKUP_FILE_FINAL" | awk '{print $1}')
 
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
             if send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text"; then
-                print_message "SUCCESS" "Бэкап успешно отправлен в Telegram."
+                print_message "SUCCESS" "The backup was successfully sent to Telegram."
             else
-                echo -e "${RED}❌ Ошибка при отправке бэкапа в Telegram. Проверьте настройки Telegram API (токен, ID чата).${RESET}"
+                echo -e "${RED}❌ Error sending backup to Telegram. Check your Telegram API settings (token, chat ID).${RESET}"
             fi
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
-                print_message "SUCCESS" "Бэкап успешно отправлен в Google Drive."
-                local tg_success_message="${caption_text//Бэкап успешно создан/Бэкап успешно создан и отправлен в Google Drive}"
+                print_message "SUCCESS" "The backup was successfully sent to Google Drive."
+                local tg_success_message="${caption_text//Backup successfully created/Backup successfully created and sent to Google Drive}"
                 
                 if send_telegram_message "$tg_success_message"; then
-                    print_message "SUCCESS" "Уведомление об успешной отправке на Google Drive отправлено в Telegram."
+                    print_message "SUCCESS" "A notification of successful sending to Google Drive has been sent to Telegram."
                 else
-                    print_message "ERROR" "Не удалось отправить уведомление в Telegram после загрузки на Google Drive."
+                    print_message "ERROR" "Failed to send notification to Telegram after uploading to Google Drive."
                 fi
             else
-                echo -e "${RED}❌ Ошибка при отправке бэкапа в Google Drive. Проверьте настройки Google Drive API.${RESET}"
-                send_telegram_message "❌ Ошибка: Не удалось отправить бэкап в Google Drive. Подробности в логах сервера." "None"
+                echo -e "${RED}❌ Error sending backup to Google Drive. Check your Google Drive API settings.${RESET}"
+                send_telegram_message "❌ Error: Failed to send backup to Google Drive. Details in the server logs." "None"
             fi
         else
-            print_message "WARN" "Неизвестный метод отправки: ${BOLD}${UPLOAD_METHOD}${RESET}. Бэкап не отправлен."
-            send_telegram_message "❌ Ошибка: Неизвестный метод отправки бэкапа: ${BOLD}${UPLOAD_METHOD}${RESET}. Файл: ${BOLD}${BACKUP_FILE_FINAL}${RESET} не отправлен." "None"
+            print_message "WARN" "Unknown upload method: ${BOLD}${UPLOAD_METHOD}${RESET}. Backup not sent."
+            send_telegram_message "❌ Error: Unknown backup sending method: ${BOLD}${UPLOAD_METHOD}${RESET}. File: ${BOLD}${BACKUP_FILE_FINAL}${RESET} not sent." "None"
         fi
     else
-        echo -e "${RED}❌ Ошибка: Финальный файл бэкапа не найден после создания: ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}. Отправка невозможна.${RESET}"
-        local error_msg="❌ Ошибка: Файл бэкапа не найден после создания: ${BOLD}${BACKUP_FILE_FINAL}${RESET}"
+        echo -e "${RED}❌ Error: The final backup file was not found after creation: ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}. Unable to send.${RESET}"
+        local error_msg="❌ Error: The backup file was not found after creation: ${BOLD}${BACKUP_FILE_FINAL}${RESET}"
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
             send_telegram_message "$error_msg" "None"
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            print_message "ERROR" "Отправка в Google Drive невозможна: файл бэкапа не найден."
+            print_message "ERROR" "Sending to Google Drive is impossible: the backup file was not found."
         fi
         exit 1
     fi
     
     echo ""
     
-    print_message "INFO" "Применение политики хранения бэкапов (оставляем за последние ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} дней)..."
+    print_message "INFO" "Applying a backup retention policy (we leave for the last ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} days)..."
     find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
-    print_message "SUCCESS" "Политика хранения применена. Старые бэкапы удалены."
+    print_message "SUCCESS" "The retention policy has been applied. Old backups have been deleted."
     
     echo ""
     
@@ -1280,7 +1280,7 @@ create_backup() {
             REMOTE_VERSION_LATEST=$(curl -fsSL "$SCRIPT_REPO_URL" 2>/dev/null | grep -m 1 "^VERSION=" | cut -d'"' -f2)
             
             if [[ -n "$REMOTE_VERSION_LATEST" ]]; then
-                local update_msg=$'⚠️ *Доступно обновление скрипта*\n🔄 *Текущая версия:* '"${CURRENT_VERSION}"$'\n🆕 *Актуальная версия:* '"${REMOTE_VERSION_LATEST}"$'\n\n📥 Обновите через пункт *«Обновление скрипта»* в главном меню'
+                local update_msg=$'⚠️ *Script update available*\n🔄 *Current version:*'"${CURRENT_VERSION}"$'\n🆕 *Current version:*'"${REMOTE_VERSION_LATEST}"$'\n\n📥 Update via the *“Script update” item* in the main menu'
                 send_telegram_message "$update_msg" >/dev/null 2>&1
             fi
         fi
@@ -1290,25 +1290,25 @@ create_backup() {
 setup_auto_send() {
     echo ""
     if [[ $EUID -ne 0 ]]; then
-        print_message "WARN" "Для настройки cron требуются права root. Пожалуйста, запустите с '${BOLD}sudo'${RESET}.${RESET}"
-        read -rp "Нажмите Enter для продолжения..."
+        print_message "WARN" "Root privileges are required to configure cron. Please run the script with ${BOLD}sudo${RESET}."
+        read -rp "Press Enter to continue..."
         return
     fi
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}Настройка автоматической отправки${RESET}"
+        echo -e "${GREEN}${BOLD}Setting automatic sending${RESET}"
         echo ""
         if [[ -n "$CRON_TIMES" ]]; then
-            print_message "INFO" "Автоматическая отправка настроена на: ${BOLD}${CRON_TIMES}${RESET} по UTC+0."
+            print_message "INFO" "Automatic sending is set to: ${BOLD}${CRON_TIMES}${RESET} by UTC+0."
         else
-            print_message "INFO" "Автоматическая отправка ${BOLD}выключена${RESET}."
+            print_message "INFO" "Auto-send ${BOLD}disabled${RESET}."
         fi
         echo ""
-        echo "   1. Включить/перезаписать автоматическую отправку бэкапов"
-        echo "   2. Выключить автоматическую отправку бэкапов"
-        echo "   0. Вернуться в главное меню"
+        echo "1. Enable/overwrite automatic sending of backups"
+        echo "2. Disable automatic sending of backups"
+        echo "0. Return to main menu"
         echo ""
-        read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
+        read -rp "${GREEN}[?]${RESET} Select an item:" choice
         echo ""
         case $choice in
             1)
@@ -1322,11 +1322,11 @@ setup_auto_send() {
                     server_offset_total_minutes=$(( -server_offset_total_minutes ))
                 fi
 
-                echo "Выберите вариант автоматической отправки:"
-                echo "  1) Ввести время (например: 08:00 12:00 18:00)"
-                echo "  2) Ежечасно"
-                echo "  3) Ежедневно"
-                read -rp "Ваш выбор: " send_choice
+                echo "Select automatic sending option:"
+                echo "1) Enter the time (for example: 08:00 12:00 18:00)"
+                echo "2) Hourly"
+                echo "3) Daily"
+                read -rp "Your choice:" send_choice
                 echo ""
 
                 cron_times_to_write=()
@@ -1334,8 +1334,8 @@ setup_auto_send() {
                 invalid_format=false
 
                 if [[ "$send_choice" == "1" ]]; then
-                    echo "Введите желаемое время отправки по UTC+0 (например, 08:00 12:00):"
-                    read -rp "Время через пробел: " times
+                    echo "Enter the desired sending time in UTC+0 (for example, 08:00 12:00):"
+                    read -rp "Time separated by space:" times
                     IFS=' ' read -ra arr <<< "$times"
 
                     for t in "${arr[@]}"; do
@@ -1360,12 +1360,12 @@ setup_auto_send() {
                                 cron_times_to_write+=("$min_local $hour_local")
                                 user_friendly_times_local+="$t "
                             else
-                                print_message "ERROR" "Неверное значение времени: ${BOLD}$t${RESET} (часы 0-23, минуты 0-59)."
+                                print_message "ERROR" "Invalid time value: ${BOLD}$t${RESET} (hours 0-23, minutes 0-59)."
                                 invalid_format=true
                                 break
                             fi
                         else
-                            print_message "ERROR" "Неверный формат времени: ${BOLD}$t${RESET} (ожидается HH:MM)."
+                            print_message "ERROR" "Invalid time format: ${BOLD}$t${RESET} (expected HH:MM)."
                             invalid_format=true
                             break
                         fi
@@ -1377,18 +1377,18 @@ setup_auto_send() {
                     cron_times_to_write=("@daily")
                     user_friendly_times_local="@daily"
                 else
-                    print_message "ERROR" "Неверный выбор."
+                    print_message "ERROR" "Wrong choice."
                     continue
                 fi
 
                 echo ""
 
                 if [ "$invalid_format" = true ] || [ ${#cron_times_to_write[@]} -eq 0 ]; then
-                    print_message "ERROR" "Автоматическая отправка не настроена из-за ошибок ввода времени. Пожалуйста, попробуйте еще раз."
+                    print_message "ERROR" "Automatic sending is not configured due to time entry errors. Please try again."
                     continue
                 fi
 
-                print_message "INFO" "Настройка cron-задачи для автоматической отправки..."
+                print_message "INFO" "Setting up a cron task to automatically send..."
 
                 local temp_crontab_file=$(mktemp)
 
@@ -1399,15 +1399,15 @@ setup_auto_send() {
                 if ! grep -q "^SHELL=" "$temp_crontab_file"; then
                     echo "SHELL=/bin/bash" | cat - "$temp_crontab_file" > "$temp_crontab_file.tmp"
                     mv "$temp_crontab_file.tmp" "$temp_crontab_file"
-                    print_message "INFO" "SHELL=/bin/bash добавлен в crontab."
+                    print_message "INFO" "SHELL=/bin/bash added to crontab."
                 fi
 
                 if ! grep -q "^PATH=" "$temp_crontab_file"; then
                     echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin" | cat - "$temp_crontab_file" > "$temp_crontab_file.tmp"
                     mv "$temp_crontab_file.tmp" "$temp_crontab_file"
-                    print_message "INFO" "PATH переменная добавлена в crontab."
+                    print_message "INFO" "PATH variable added to crontab."
                 else
-                    print_message "INFO" "PATH переменная уже существует в crontab."
+                    print_message "INFO" "PATH variable already exists in crontab."
                 fi
 
                 grep -vF "$SCRIPT_PATH backup" "$temp_crontab_file" > "$temp_crontab_file.tmp"
@@ -1422,45 +1422,45 @@ setup_auto_send() {
                 done
 
                 if crontab "$temp_crontab_file"; then
-                    print_message "SUCCESS" "CRON-задача для автоматической отправки успешно установлена."
+                    print_message "SUCCESS" "The CRON task for automatic sending has been successfully installed."
                 else
-                    print_message "ERROR" "Не удалось установить CRON-задачу. Проверьте права доступа и наличие crontab."
+                    print_message "ERROR" "Failed to install CRON task. Check access rights and the presence of crontab."
                 fi
 
                 rm -f "$temp_crontab_file"
 
                 CRON_TIMES="${user_friendly_times_local% }"
                 save_config
-                print_message "SUCCESS" "Автоматическая отправка установлена на: ${BOLD}${CRON_TIMES}${RESET} по UTC+0."
+                print_message "SUCCESS" "Automatic sending is set to: ${BOLD}${CRON_TIMES}${RESET} by UTC+0."
                 ;;
             2)
-                print_message "INFO" "Отключение автоматической отправки..."
+                print_message "INFO" "Disabling automatic sending..."
                 (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
 
                 CRON_TIMES=""
                 save_config
-                print_message "SUCCESS" "Автоматическая отправка успешно отключена."
+                print_message "SUCCESS" "Automatic sending has been successfully disabled."
                 ;;
             0) break ;;
-            *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+            *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ;;
         esac
         echo ""
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
     done
     echo ""
 }
     
 restore_backup() {
     clear
-    echo "${GREEN}${BOLD}Восстановление из бэкапа${RESET}"
+    echo "${GREEN}${BOLD}Restoring from backup${RESET}"
     echo ""
 
-    print_message "INFO" "Поместите файл бэкапа в папку: ${BOLD}${BACKUP_DIR}${RESET}"
+    print_message "INFO" "Place the backup file in the folder: ${BOLD}${BACKUP_DIR}${RESET}"
     echo ""
 
     if ! compgen -G "$BACKUP_DIR/remnawave_backup_*.tar.gz" > /dev/null; then
-        print_message "ERROR" "Ошибка: Не найдено файлов бэкапов в ${BOLD}${BACKUP_DIR}${RESET}."
-        read -rp "Нажмите Enter для возврата в меню..."
+        print_message "ERROR" "Error: No backup files found in ${BOLD}${BACKUP_DIR}${RESET}."
+        read -rp "Press Enter to return to the menu..."
         return
     fi
 
@@ -1469,41 +1469,41 @@ restore_backup() {
     )
 
     echo ""
-    echo "Выберите файл для восстановления:"
+    echo "Select the file to restore:"
     local i=1
     for file in "${SORTED_BACKUP_FILES[@]}"; do
         echo " $i) ${file##*/}"
         i=$((i+1))
     done
     echo ""
-    echo " 0) Вернуться в главное меню"
+    echo "0) Return to main menu"
     echo ""
 
     local user_choice selected_index
     while true; do
-        read -rp "${GREEN}[?]${RESET} Введите номер файла (0 для выхода): " user_choice
+        read -rp "${GREEN}[?]${RESET} Enter file number (0 to exit):" user_choice
         [[ "$user_choice" == "0" ]] && return
-        [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "Неверный ввод."; continue; }
+        [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "Invalid input."; continue; }
         selected_index=$((user_choice - 1))
         (( selected_index >= 0 && selected_index < ${#SORTED_BACKUP_FILES[@]} )) && break
-        print_message "ERROR" "Неверный номер."
+        print_message "ERROR" "Invalid number."
     done
 
     SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
 
     clear
-    print_message "INFO" "Распаковка архива бэкапа..."
+    print_message "INFO" "Unpacking the backup archive..."
     local temp_restore_dir="$BACKUP_DIR/restore_temp_$$"
     mkdir -p "$temp_restore_dir"
 
     if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
-        print_message "ERROR" "Ошибка распаковки архива."
+        print_message "ERROR" "Error unpacking archive."
         rm -rf "$temp_restore_dir"
-        read -rp "Нажмите Enter для возврата в меню..."
+        read -rp "Press Enter to return to the menu..."
         return
     fi
 
-    print_message "SUCCESS" "Архив распакован."
+    print_message "SUCCESS" "The archive has been unpacked."
     echo ""
 
     local PANEL_DUMP
@@ -1515,16 +1515,16 @@ restore_backup() {
     local BOT_STATUS=2
 
     if [[ -z "$PANEL_DUMP" || -z "$PANEL_DIR_ARCHIVE" ]]; then
-        print_message "WARN" "Файлы панели в бэкапе не найдены."
+        print_message "WARN" "The panel files were not found in the backup."
         PANEL_STATUS=2
     else
-        print_message "WARN" "Найден бэкап панели. Восстановление перезапишет текущую БД."
-        read -rp "$(echo -e "${GREEN}[?]${RESET} Восстановить панель? (${GREEN}Y${RESET} - Да / ${RED}N${RESET} - пропустить): ")" confirm_panel
+        print_message "WARN" "Panel backup found. The restore will overwrite the current database."
+        read -rp "$(echo -e "${GREEN}[?]${RESET} Restore the panel? (${GREEN}Y${RESET} - Yes / ${RED}N${RESET} - skip):")" confirm_panel
         echo ""
         if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
             check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
-            print_message "INFO" "Введите имя БД (по умолчанию postgres):"
-            read -rp "Ввод: " restore_db_name
+            print_message "INFO" "Enter the database name (postgres by default):"
+            read -rp "Input:" restore_db_name
             restore_db_name="${restore_db_name:-postgres}"
 
             if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
@@ -1543,45 +1543,45 @@ restore_backup() {
             rm -rf "$extract_dir"
 
             docker volume rm remnawave-db-data 2>/dev/null || true
-            cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Директория не найдена"; return; }
+            cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "Directory not found"; return; }
             docker compose up -d remnawave-db
 
-            print_message "INFO" "Ожидание готовности БД..."
+            print_message "INFO" "Waiting for the database to be ready..."
             until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
                 sleep 2
                 echo -n "."
             done
             echo ""
 
-            print_message "INFO" "Восстановление базы данных..."
+            print_message "INFO" "Database recovery..."
             gunzip "$PANEL_DUMP"
             local sql_file="${PANEL_DUMP%.gz}"
             local restore_log="$temp_restore_dir/restore_errors.log"
 
             if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
                 echo ""
-                print_message "ERROR" "Ошибка восстановления БД."
+                print_message "ERROR" "Database recovery error."
                 [[ -f "$restore_log" ]] && cat "$restore_log"
                 rm -rf "$temp_restore_dir"
-                read -rp "Нажмите Enter для возврата в меню..."
+                read -rp "Press Enter to return to the menu..."
                 return 1
             fi
 
-            print_message "SUCCESS" "База данных успешно восстановлена."
+            print_message "SUCCESS" "The database was successfully restored."
             echo ""
-            print_message "INFO" "Запуск остальных контейнеров..."
+            print_message "INFO" "Launching the remaining containers..."
             
             if docker compose up -d; then
-                print_message "SUCCESS" "Панель успешно запущена."
+                print_message "SUCCESS" "The panel has been launched successfully."
                 PANEL_STATUS=0
             else
-                print_message "ERROR" "Не удалось запустить контейнеры панели."
+                print_message "ERROR" "Panel containers failed to start."
                 rm -rf "$temp_restore_dir"
-                read -rp "Нажмите Enter для возврата в меню..."
+                read -rp "Press Enter to return to the menu..."
                 return 1
             fi
         else
-            print_message "INFO" "Восстановление панели пропущено пользователем."
+            print_message "INFO" "Panel restoration was skipped by the user."
             PANEL_STATUS=2
         fi
     fi
@@ -1589,7 +1589,7 @@ restore_backup() {
     echo ""
 
     if [[ "$PANEL_STATUS" == "0" ]]; then
-        print_message "WARN" "Панель готова. Нажмите Enter для продолжения..."
+        print_message "WARN" "The panel is ready. Press Enter to continue..."
         read -rp ""
     fi
 
@@ -1605,40 +1605,40 @@ restore_backup() {
     
     REMNAWAVE_VERSION=$(get_remnawave_version)
     local telegram_msg
-    telegram_msg=$'💾 #restore_success\n➖➖➖➖➖➖➖➖➖\n✅ *Восстановление завершено*\n🌊 *Remnawave:* '"${REMNAWAVE_VERSION}"
+    telegram_msg=$'💾 #restore_success\n➖➖➖➖➖➖➖➖➖\n✅ *Restore completed*\n🌊 *Remnawave:*'"${REMNAWAVE_VERSION}"
 
     if [[ "$PANEL_STATUS" == "0" && "$BOT_STATUS" == "0" ]]; then
-        telegram_msg+=$'\n✨ *Панель и Telegram бот*'
+        telegram_msg+=$'\n✨ *Panel and Telegram bot*'
     elif [[ "$PANEL_STATUS" == "0" ]]; then
-        telegram_msg+=$'\n📦 *Только панель*'
+        telegram_msg+=$'\n📦 *Panel only*'
     elif [[ "$BOT_STATUS" == "0" ]]; then
-        telegram_msg+=$'\n🤖 *Только Telegram бот*'
+        telegram_msg+=$'\n🤖 *Telegram bot only*'
     else
-        telegram_msg+=$'\n⚠️ *Ничего не восстановлено*'
+        telegram_msg+=$'\n⚠️ *Nothing restored*'
     fi
 
-    print_message "SUCCESS" "Процесс восстановления завершен."
+    print_message "SUCCESS" "The recovery process is complete."
     send_telegram_message "$telegram_msg" >/dev/null 2>&1
-    read -rp "Нажмите Enter для возврата в меню..."
+    read -rp "Press Enter to return to the menu..."
 }
 
 update_script() {
-    print_message "INFO" "Начинаю процесс проверки обновлений..."
+    print_message "INFO" "I'm starting the process of checking for updates..."
     echo ""
     if [[ "$EUID" -ne 0 ]]; then
-        echo -e "${RED}⛔ Для обновления скрипта требуются права root. Пожалуйста, запустите с '${BOLD}sudo'${RESET}.${RESET}"
-        read -rp "Нажмите Enter для продолжения..."
+        echo -e "${RED}⛔ Root privileges are required to update the script. Please run it with ${BOLD}sudo${RESET}.${RESET}"
+        read -rp "Press Enter to continue..."
         return
     fi
 
-    print_message "INFO" "Получение информации о последней версии скрипта с GitHub..."
+    print_message "INFO" "Getting information about the latest version of a script from GitHub..."
     local TEMP_REMOTE_VERSION_FILE
     TEMP_REMOTE_VERSION_FILE=$(mktemp)
 
     if ! curl -fsSL "$SCRIPT_REPO_URL" 2>/dev/null | head -n 100 > "$TEMP_REMOTE_VERSION_FILE"; then
-        print_message "ERROR" "Не удалось загрузить информацию о новой версии с GitHub. Проверьте URL или сетевое соединение."
+        print_message "ERROR" "Failed to download new version information from GitHub. Check the URL or network connection."
         rm -f "$TEMP_REMOTE_VERSION_FILE"
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
         return
     fi
 
@@ -1646,13 +1646,13 @@ update_script() {
     rm -f "$TEMP_REMOTE_VERSION_FILE"
 
     if [[ -z "$REMOTE_VERSION" ]]; then
-        print_message "ERROR" "Не удалось извлечь информацию о версии из удаленного скрипта. Возможно, формат переменной VERSION изменился."
-        read -rp "Нажмите Enter для продолжения..."
+        print_message "ERROR" "Failed to retrieve version information from remote script. The format of the VERSION variable may have changed."
+        read -rp "Press Enter to continue..."
         return
     fi
 
-    print_message "INFO" "Текущая версия: ${BOLD}${YELLOW}${VERSION}${RESET}"
-    print_message "INFO" "Доступная версия: ${BOLD}${GREEN}${REMOTE_VERSION}${RESET}"
+    print_message "INFO" "Current version: ${BOLD}${YELLOW}${VERSION}${RESET}"
+    print_message "INFO" "Available version: ${BOLD}${GREEN}${REMOTE_VERSION}${RESET}"
     echo ""
 
     compare_versions() {
@@ -1685,116 +1685,116 @@ update_script() {
     }
 
     if compare_versions "$VERSION" "$REMOTE_VERSION"; then
-        print_message "ACTION" "Доступно обновление до версии ${BOLD}${REMOTE_VERSION}${RESET}."
-        echo -e -n "Хотите обновить скрипт? Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
+        print_message "ACTION" "An update to version ${BOLD}${REMOTE_VERSION}${RESET} is available."
+        echo -e -n "Do you want to update the script? Enter ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:"
         read -r confirm_update
         echo ""
 
         if [[ "${confirm_update,,}" != "y" ]]; then
-            print_message "WARN" "Обновление отменено пользователем. Возврат в главное меню."
-            read -rp "Нажмите Enter для продолжения..."
+            print_message "WARN" "The update was canceled by the user. Return to main menu."
+            read -rp "Press Enter to continue..."
             return
         fi
     else
-        print_message "INFO" "У вас установлена актуальная версия скрипта. Обновление не требуется."
-        read -rp "Нажмите Enter для продолжения..."
+        print_message "INFO" "You have the latest version of the script installed. No update required."
+        read -rp "Press Enter to continue..."
         return
     fi
 
     local TEMP_SCRIPT_PATH="${INSTALL_DIR}/backup-restore.sh.tmp"
-    print_message "INFO" "Загрузка обновления..."
+    print_message "INFO" "Loading update..."
     if ! curl -fsSL "$SCRIPT_REPO_URL" -o "$TEMP_SCRIPT_PATH"; then
-        print_message "ERROR" "Не удалось загрузить новую версию скрипта."
-        read -rp "Нажмите Enter для продолжения..."
+        print_message "ERROR" "Failed to load new version of script."
+        read -rp "Press Enter to continue..."
         return
     fi
 
     if [[ ! -s "$TEMP_SCRIPT_PATH" ]] || ! head -n 1 "$TEMP_SCRIPT_PATH" | grep -q -e '^#!.*bash'; then
-        print_message "ERROR" "Загруженный файл пуст или не является исполняемым bash-скриптом. Обновление невозможно."
+        print_message "ERROR" "The downloaded file is empty or is not an executable bash script. Updating is not possible."
         rm -f "$TEMP_SCRIPT_PATH"
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
         return
     fi
 
-    print_message "INFO" "Удаление старых резервных копий скрипта..."
+    print_message "INFO" "Deleting old script backups..."
     find "$(dirname "$SCRIPT_PATH")" -maxdepth 1 -name "${SCRIPT_NAME}.bak.*" -type f -delete
     echo ""
 
     local BACKUP_PATH_SCRIPT="${SCRIPT_PATH}.bak.$(date +%s)"
-    print_message "INFO" "Создание резервной копии текущего скрипта..."
+    print_message "INFO" "Creating a backup copy of the current script..."
     cp "$SCRIPT_PATH" "$BACKUP_PATH_SCRIPT" || {
-        echo -e "${RED}❌ Не удалось создать резервную копию ${BOLD}${SCRIPT_PATH}${RESET}. Обновление отменено.${RESET}"
+        echo -e "${RED}❌ Failed to back up ${BOLD}${SCRIPT_PATH}${RESET}. Update cancelled.${RESET}"
         rm -f "$TEMP_SCRIPT_PATH"
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
         return
     }
     echo ""
 
     mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH" || {
-        echo -e "${RED}❌ Ошибка перемещения временного файла в ${BOLD}${SCRIPT_PATH}${RESET}. Пожалуйста, проверьте права доступа.${RESET}"
-        echo -e "${YELLOW}⚠️ Восстановление из резервной копии ${BOLD}${BACKUP_PATH_SCRIPT}${RESET}...${RESET}"
+        echo -e "${RED}❌ Error moving temporary file to ${BOLD}${SCRIPT_PATH}${RESET}. Please check your permissions.${RESET}"
+        echo -e "${YELLOW}⚠️ Restoring from a backup ${BOLD}${BACKUP_PATH_SCRIPT}${RESET}...${RESET}"
         mv "$BACKUP_PATH_SCRIPT" "$SCRIPT_PATH"
         rm -f "$TEMP_SCRIPT_PATH"
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
         return
     }
 
     chmod +x "$SCRIPT_PATH"
-    print_message "SUCCESS" "Скрипт успешно обновлен до версии ${BOLD}${GREEN}${REMOTE_VERSION}${RESET}."
+    print_message "SUCCESS" "The script was successfully updated to version ${BOLD}${GREEN}${REMOTE_VERSION}${RESET}."
     echo ""
-    print_message "INFO" "Для применения изменений скрипт будет перезапущен..."
-    read -rp "Нажмите Enter для перезапуска."
+    print_message "INFO" "The script will be restarted to apply the changes..."
+    read -rp "Press Enter to restart."
     exec "$SCRIPT_PATH" "$@"
     exit 0
 }
 
 remove_script() {
-    print_message "WARN" "${YELLOW}ВНИМАНИЕ!${RESET} Будут удалены: "
-    echo  " - Скрипт"
-    echo  " - Каталог установки и все бэкапы"
-    echo  " - Символическая ссылка (если существует)"
-    echo  " - Задачи cron"
+    print_message "WARN" "${YELLOW}ATTENTION!${RESET} The following will be deleted:"
+    echo  "- Script"
+    echo  "- Installation directory and all backups"
+    echo  "- Symbolic link (if exists)"
+    echo  "- cron tasks"
     echo ""
-    echo -e -n "Вы уверены, что хотите продолжить? Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
+    echo -e -n "Are you sure you want to continue? Enter ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:"
     read -r confirm
     echo ""
     
     if [[ "${confirm,,}" != "y" ]]; then
-    print_message "WARN" "Удаление отменено."
-    read -rp "Нажмите Enter для продолжения..."
+    print_message "WARN" "Deletion cancelled."
+    read -rp "Press Enter to continue..."
     return
     fi
 
     if [[ "$EUID" -ne 0 ]]; then
-        print_message "WARN" "Для полного удаления требуются права root. Пожалуйста, запустите с ${BOLD}sudo${RESET}."
-        read -rp "Нажмите Enter для продолжения..."
+        print_message "WARN" "Complete removal requires root rights. Please run with ${BOLD}sudo${RESET}."
+        read -rp "Press Enter to continue..."
         return
     fi
 
-    print_message "INFO" "Удаление cron-задач..."
+    print_message "INFO" "Deleting cron tasks..."
     if crontab -l 2>/dev/null | grep -qF "$SCRIPT_PATH backup"; then
         (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
-        print_message "SUCCESS" "Задачи cron для автоматического бэкапа удалены."
+        print_message "SUCCESS" "Cron tasks for automatic backup have been removed."
     else
-        print_message "INFO" "Задачи cron для автоматического бэкапа не найдены."
+        print_message "INFO" "No cron jobs were found for automatic backup."
     fi
     echo ""
 
-    print_message "INFO" "Удаление символической ссылки..."
+    print_message "INFO" "Removing a symbolic link..."
     if [[ -L "$SYMLINK_PATH" ]]; then
-        rm -f "$SYMLINK_PATH" && print_message "SUCCESS" "Символическая ссылка ${BOLD}${SYMLINK_PATH}${RESET} удалена." || print_message "WARN" "Не удалось удалить символическую ссылку ${BOLD}${SYMLINK_PATH}${RESET}. Возможно, потребуется ручное удаление."
+        rm -f "$SYMLINK_PATH" && print_message "SUCCESS" "The symbolic link ${BOLD}${SYMLINK_PATH}${RESET} has been removed." || print_message "WARN" "Failed to remove symbolic link ${BOLD}${SYMLINK_PATH}${RESET}. Manual removal may be required."
     elif [[ -e "$SYMLINK_PATH" ]]; then
-        print_message "WARN" "${BOLD}${SYMLINK_PATH}${RESET} существует, но не является символической ссылкой. Рекомендуется проверить и удалить вручную."
+        print_message "WARN" "${BOLD}${SYMLINK_PATH}${RESET} exists but is not a symbolic link. It is recommended to check and remove manually."
     else
-        print_message "INFO" "Символическая ссылка ${BOLD}${SYMLINK_PATH}${RESET} не найдена."
+        print_message "INFO" "Symbolic link ${BOLD}${SYMLINK_PATH}${RESET} not found."
     fi
     echo ""
 
-    print_message "INFO" "Удаление каталога установки и всех данных..."
+    print_message "INFO" "Deleting the installation directory and all data..."
     if [[ -d "$INSTALL_DIR" ]]; then
-        rm -rf "$INSTALL_DIR" && print_message "SUCCESS" "Каталог установки ${BOLD}${INSTALL_DIR}${RESET} (включая скрипт, конфигурацию, бэкапы) удален." || echo -e "${RED}❌ Ошибка при удалении каталога ${BOLD}${INSTALL_DIR}${RESET}. Возможно, потребуются права 'root' или каталог занят.${RESET}"
+        rm -rf "$INSTALL_DIR" && print_message "SUCCESS" "The installation directory ${BOLD}${INSTALL_DIR}${RESET} (including script, configuration, and backups) has been deleted." || echo -e "${RED}❌ Error deleting directory ${BOLD}${INSTALL_DIR}${RESET}. You may need root permissions or the directory may be in use.${RESET}"
     else
-        print_message "INFO" "Каталог установки ${BOLD}${INSTALL_DIR}${RESET} не найден."
+        print_message "INFO" "The installation directory ${BOLD}${INSTALL_DIR}${RESET} was not found."
     fi
     exit 0
 }
@@ -1802,61 +1802,61 @@ remove_script() {
 configure_upload_method() {
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}Настройка способа отправки бэкапов${RESET}"
+        echo -e "${GREEN}${BOLD}Configuring the method for sending backups${RESET}"
         echo ""
-        print_message "INFO" "Текущий способ: ${BOLD}${UPLOAD_METHOD^^}${RESET}"
+        print_message "INFO" "Current method: ${BOLD}${UPLOAD_METHOD^^}${RESET}"
         echo ""
-        echo "   1. Установить способ отправки: Telegram"
-        echo "   2. Установить способ отправки: Google Drive"
+        echo "1. Set the sending method: Telegram"
+        echo "2. Set the sending method: Google Drive"
         echo ""
-        echo "   0. Вернуться в главное меню"
+        echo "0. Return to main menu"
         echo ""
-        read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
+        read -rp "${GREEN}[?]${RESET} Select an item:" choice
         echo ""
 
         case $choice in
             1)
                 UPLOAD_METHOD="telegram"
                 save_config
-                print_message "SUCCESS" "Способ отправки установлен на ${BOLD}Telegram${RESET}."
+                print_message "SUCCESS" "The sending method is set to ${BOLD}Telegram${RESET}."
                 if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-                    print_message "ACTION" "Пожалуйста, введите данные для Telegram:"
+                    print_message "ACTION" "Please enter your Telegram details:"
                     echo ""
-                    print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
-                    read -rp "   Введите API Token: " BOT_TOKEN
+                    print_message "INFO" "Create a Telegram bot in ${CYAN}@BotFather${RESET} and get an API Token"
+                    read -rp "Enter API Token:" BOT_TOKEN
                     echo ""
-                    print_message "INFO" "Свой ID можно узнать у этого бота в Telegram ${CYAN}@userinfobot${RESET}"
-                    read -rp "   Введите свой Telegram ID: " CHAT_ID
+                    print_message "INFO" "You can find out your ID from this bot in Telegram ${CYAN}@userinfobot${RESET}"
+                    read -rp "Enter your Telegram ID:" CHAT_ID
                     save_config
-                    print_message "SUCCESS" "Настройки Telegram сохранены."
+                    print_message "SUCCESS" "Telegram settings are saved."
                 fi
                 ;;
             2)
                 UPLOAD_METHOD="google_drive"
-                print_message "SUCCESS" "Способ отправки установлен на ${BOLD}Google Drive${RESET}."
+                print_message "SUCCESS" "The sending method is set to ${BOLD}Google Drive${RESET}."
                 
                 local gd_setup_successful=true
 
                 if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-                    print_message "ACTION" "Пожалуйста, введите данные для Google Drive API."
+                    print_message "ACTION" "Please enter your Google Drive API details."
                     echo ""
-                    echo "Если у вас нет Client ID и Client Secret токенов"
+                    echo "If you do not have Client ID and Client Secret tokens"
                     local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                    print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
-                    read -rp "   Введите Google Client ID: " GD_CLIENT_ID
-                    read -rp "   Введите Google Client Secret: " GD_CLIENT_SECRET
+                    print_message "LINK" "Check out this guide: ${CYAN}${guide_url}${RESET}"
+                    read -rp "Enter Google Client ID:" GD_CLIENT_ID
+                    read -rp "Enter Google Client Secret:" GD_CLIENT_SECRET
                     
                     clear
                     
-                    print_message "WARN" "Для получения Refresh Token необходимо пройти авторизацию в браузере."
-                    print_message "INFO" "Откройте следующую ссылку в браузере, авторизуйтесь и скопируйте ${BOLD}код${RESET}:"
+                    print_message "WARN" "To receive a Refresh Token, you must log in to your browser."
+                    print_message "INFO" "Open the following link in your browser, log in and copy the ${BOLD}code${RESET}:"
                     echo ""
                     local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
                     print_message "INFO" "${CYAN}${auth_url}${RESET}"
                     echo ""
-                    read -rp "Введите код из браузера: " AUTH_CODE
+                    read -rp "Enter the code from the browser:" AUTH_CODE
                     
-                    print_message "INFO" "Получение Refresh Token..."
+                    print_message "INFO" "Receiving Refresh Token..."
                     local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
                         -d client_id="$GD_CLIENT_ID" \
                         -d client_secret="$GD_CLIENT_SECRET" \
@@ -1867,41 +1867,41 @@ configure_upload_method() {
                     GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
                     
                     if [[ -z "$GD_REFRESH_TOKEN" || "$GD_REFRESH_TOKEN" == "null" ]]; then
-                        print_message "ERROR" "Не удалось получить Refresh Token. Проверьте введенные данные."
-                        print_message "WARN" "Настройка не завершена, способ отправки будет изменён на ${BOLD}Telegram${RESET}."
+                        print_message "ERROR" "Failed to obtain Refresh Token. Check the entered data."
+                        print_message "WARN" "The setup is not completed, the sending method will be changed to ${BOLD}Telegram${RESET}."
                         UPLOAD_METHOD="telegram"
                         gd_setup_successful=false
                     else
-                        print_message "SUCCESS" "Refresh Token успешно получен."
+                        print_message "SUCCESS" "Refresh Token successfully received."
                     fi
                     echo
                     
                     if $gd_setup_successful; then
-                        echo "   📁 Чтобы указать папку Google Drive:"
-                        echo "   1. Создайте и откройте нужную папку в браузере."
-                        echo "   2. Посмотрите на ссылку в адресной строке,она выглядит так:"
+                        echo "📁 To specify the Google Drive folder:"
+                        echo "1. Create and open the desired folder in the browser."
+                        echo "2. Look at the link in the address bar, it looks like this:"
                         echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-                        echo "   3. Скопируйте часть после /folders/ — это и есть Folder ID:"
-                        echo "   4. Если оставить поле пустым — бекап будет отправлен в корневую папку Google Drive."
+                        echo "3. Copy the part after /folders/ - this is the Folder ID:"
+                        echo "4. If you leave the field empty, the backup will be sent to the root folder of Google Drive."
                         echo
 
-                        read -rp "   Введите Google Drive Folder ID (оставьте пустым для корневой папки): " GD_FOLDER_ID
+                        read -rp "Enter Google Drive Folder ID (leave blank for root folder):" GD_FOLDER_ID
                     fi
                 fi
 
                 save_config
 
                 if $gd_setup_successful; then
-                    print_message "SUCCESS" "Настройки Google Drive сохранены."
+                    print_message "SUCCESS" "Google Drive settings are saved."
                 else
-                    print_message "SUCCESS" "Способ отправки установлен на ${BOLD}Telegram${RESET}."
+                    print_message "SUCCESS" "The sending method is set to ${BOLD}Telegram${RESET}."
                 fi
                 ;;
             0) break ;;
-            *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+            *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ;;
         esac
         echo ""
-        read -rp "Нажмите Enter для продолжения..."
+        read -rp "Press Enter to continue..."
     done
     echo ""
 }
@@ -1909,119 +1909,119 @@ configure_upload_method() {
 configure_settings() {
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}Настройка конфигурации скрипта${RESET}"
+        echo -e "${GREEN}${BOLD}Script configuration settings${RESET}"
         echo ""
-        echo "   1. Настройки Telegram"
-        echo "   2. Настройки Google Drive"
-        echo "   3. Имя пользователя БД Remnawave"
-        echo "   4. Путь Remnawave"
+        echo "1. Telegram settings"
+        echo "2. Google Drive Settings"
+        echo "3. Database username Remnawave"
+        echo "4. Remnawave Path"
         echo ""
-        echo "   0. Вернуться в главное меню"
+        echo "0. Return to main menu"
         echo ""
-        read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
+        read -rp "${GREEN}[?]${RESET} Select an item:" choice
         echo ""
 
         case $choice in
             1)
                 while true; do
                     clear
-                    echo -e "${GREEN}${BOLD}Настройки Telegram${RESET}"
+                    echo -e "${GREEN}${BOLD}Telegram Settings${RESET}"
                     echo ""
-                    print_message "INFO" "Текущий API Token: ${BOLD}${BOT_TOKEN}${RESET}"
-                    print_message "INFO" "Текущий ID: ${BOLD}${CHAT_ID}${RESET}"
-                    print_message "INFO" "Текущий Message Thread ID: ${BOLD}${TG_MESSAGE_THREAD_ID:-Не установлен}${RESET}"
+                    print_message "INFO" "Current API Token: ${BOLD}${BOT_TOKEN}${RESET}"
+                    print_message "INFO" "Current ID: ${BOLD}${CHAT_ID}${RESET}"
+                    print_message "INFO" "Current Message Thread ID: ${BOLD}${TG_MESSAGE_THREAD_ID:-Not set}${RESET}"
                     echo ""
-                    echo "   1. Изменить API Token"
-                    echo "   2. Изменить ID"
-                    echo "   3. Изменить Message Thread ID (для топиков групп)"
+                    echo "1. Change API Token"
+                    echo "2. Change ID"
+                    echo "3. Change Message Thread ID (for group topics)"
                     echo ""
-                    echo "   0. Назад"
+                    echo "0. Back"
                     echo ""
-                    read -rp "${GREEN}[?]${RESET} Выберите пункт: " telegram_choice
+                    read -rp "${GREEN}[?]${RESET} Select an item:" telegram_choice
                     echo ""
 
                     case $telegram_choice in
                         1)
-                            print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
-                            read -rp "   Введите новый API Token: " NEW_BOT_TOKEN
+                            print_message "INFO" "Create a Telegram bot in ${CYAN}@BotFather${RESET} and get an API Token"
+                            read -rp "Enter the new API Token:" NEW_BOT_TOKEN
                             BOT_TOKEN="$NEW_BOT_TOKEN"
                             save_config
-                            print_message "SUCCESS" "API Token успешно обновлен."
+                            print_message "SUCCESS" "API Token has been successfully updated."
                             ;;
                         2)
-                            print_message "INFO" "Введите Chat ID (для отправки в группу) или свой Telegram ID (для прямой отправки в бота)"
-                            echo -e "       Chat ID/Telegram ID можно узнать у этого бота ${CYAN}@username_to_id_bot${RESET}"
-                            read -rp "   Введите новый ID: " NEW_CHAT_ID
+                            print_message "INFO" "Enter Chat ID (to send to the group) or your Telegram ID (to send directly to the bot)"
+                            echo -e "Chat ID/Telegram ID can be found from this bot ${CYAN}@username_to_id_bot${RESET}"
+                            read -rp "Enter new ID:" NEW_CHAT_ID
                             CHAT_ID="$NEW_CHAT_ID"
                             save_config
-                            print_message "SUCCESS" "ID успешно обновлен."
+                            print_message "SUCCESS" "ID updated successfully."
                             ;;
                         3)
-                            print_message "INFO" "Опционально: для отправки в определенный топик группы, введите ID топика (Message Thread ID)"
-                            echo -e "       Оставьте пустым для общего потока или отправки напрямую в бота"
-                            read -rp "   Введите Message Thread ID: " NEW_TG_MESSAGE_THREAD_ID
+                            print_message "INFO" "Optional: to send to a specific group topic, enter the topic ID (Message Thread ID)"
+                            echo -e "Leave blank for general thread or sending directly to bot"
+                            read -rp "Enter Message Thread ID:" NEW_TG_MESSAGE_THREAD_ID
                             TG_MESSAGE_THREAD_ID="$NEW_TG_MESSAGE_THREAD_ID"
                             save_config
-                            print_message "SUCCESS" "Message Thread ID успешно обновлен."
+                            print_message "SUCCESS" "Message Thread ID updated successfully."
                             ;;
                         0) break ;;
-                        *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+                        *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ;;
                     esac
                     echo ""
-                    read -rp "Нажмите Enter для продолжения..."
+                    read -rp "Press Enter to continue..."
                 done
                 ;;
 
             2)
                 while true; do
                     clear
-                    echo -e "${GREEN}${BOLD}Настройки Google Drive${RESET}"
+                    echo -e "${GREEN}${BOLD}Google Drive Settings${RESET}"
                     echo ""
-                    print_message "INFO" "Текущий Client ID: ${BOLD}${GD_CLIENT_ID:0:8}...${RESET}"
-                    print_message "INFO" "Текущий Client Secret: ${BOLD}${GD_CLIENT_SECRET:0:8}...${RESET}"
-                    print_message "INFO" "Текущий Refresh Token: ${BOLD}${GD_REFRESH_TOKEN:0:8}...${RESET}"
-                    print_message "INFO" "Текущий Drive Folder ID: ${BOLD}${GD_FOLDER_ID:-Корневая папка}${RESET}"
+                    print_message "INFO" "Current Client ID: ${BOLD}${GD_CLIENT_ID:0:8}...${RESET}"
+                    print_message "INFO" "Current Client Secret: ${BOLD}${GD_CLIENT_SECRET:0:8}...${RESET}"
+                    print_message "INFO" "Current Refresh Token: ${BOLD}${GD_REFRESH_TOKEN:0:8}...${RESET}"
+                    print_message "INFO" "Current Drive Folder ID: ${BOLD}${GD_FOLDER_ID:-Root folder}${RESET}"
                     echo ""
-                    echo "   1. Изменить Google Client ID"
-                    echo "   2. Изменить Google Client Secret"
-                    echo "   3. Изменить Google Refresh Token (потребуется повторная авторизация)"
-                    echo "   4. Изменить Google Drive Folder ID"
+                    echo "1. Change Google Client ID"
+                    echo "2. Change Google Client Secret"
+                    echo "3. Change Google Refresh Token (re-authorization required)"
+                    echo "4. Change Google Drive Folder ID"
                     echo ""
-                    echo "   0. Назад"
+                    echo "0. Back"
                     echo ""
-                    read -rp "${GREEN}[?]${RESET} Выберите пункт: " gd_choice
+                    read -rp "${GREEN}[?]${RESET} Select an item:" gd_choice
                     echo ""
 
                     case $gd_choice in
                         1)
-                            echo "Если у вас нет Client ID и Client Secret токенов"
+                            echo "If you do not have Client ID and Client Secret tokens"
                             local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                            print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
-                            read -rp "   Введите новый Google Client ID: " NEW_GD_CLIENT_ID
+                            print_message "LINK" "Check out this guide: ${CYAN}${guide_url}${RESET}"
+                            read -rp "Enter your new Google Client ID:" NEW_GD_CLIENT_ID
                             GD_CLIENT_ID="$NEW_GD_CLIENT_ID"
                             save_config
-                            print_message "SUCCESS" "Google Client ID успешно обновлен."
+                            print_message "SUCCESS" "Google Client ID has been successfully updated."
                             ;;
                         2)
-                            echo "Если у вас нет Client ID и Client Secret токенов"
+                            echo "If you do not have Client ID and Client Secret tokens"
                             local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                            print_message "LINK" "Изучите этот гайд: ${CYAN}${guide_url}${RESET}"
-                            read -rp "   Введите новый Google Client Secret: " NEW_GD_CLIENT_SECRET
+                            print_message "LINK" "Check out this guide: ${CYAN}${guide_url}${RESET}"
+                            read -rp "Enter your new Google Client Secret:" NEW_GD_CLIENT_SECRET
                             GD_CLIENT_SECRET="$NEW_GD_CLIENT_SECRET"
                             save_config
-                            print_message "SUCCESS" "Google Client Secret успешно обновлен."
+                            print_message "SUCCESS" "Google Client Secret has been successfully updated."
                             ;;
                         3)
                             clear
-                            print_message "WARN" "Для получения нового Refresh Token необходимо пройти авторизацию в браузере."
-                            print_message "INFO" "Откройте следующую ссылку в браузере, авторизуйтесь и скопируйте ${BOLD}код${RESET}:"
+                            print_message "WARN" "To receive a new Refresh Token, you must log in to your browser."
+                            print_message "INFO" "Open the following link in your browser, log in and copy the ${BOLD}code${RESET}:"
                             echo ""
                             local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
                             print_message "LINK" "${CYAN}${auth_url}${RESET}"
                             echo ""
-                            read -rp "Введите код из браузера: " AUTH_CODE
+                            read -rp "Enter the code from the browser:" AUTH_CODE
                             
-                            print_message "INFO" "Получение Refresh Token..."
+                            print_message "INFO" "Receiving Refresh Token..."
                             local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
                                 -d client_id="$GD_CLIENT_ID" \
                                 -d client_secret="$GD_CLIENT_SECRET" \
@@ -2032,118 +2032,118 @@ configure_settings() {
                             NEW_GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
                             
                             if [[ -z "$NEW_GD_REFRESH_TOKEN" || "$NEW_GD_REFRESH_TOKEN" == "null" ]]; then
-                                print_message "ERROR" "Не удалось получить Refresh Token. Проверьте введенные данные."
-                                print_message "WARN" "Настройка не завершена."
+                                print_message "ERROR" "Failed to obtain Refresh Token. Check the entered data."
+                                print_message "WARN" "Setup is not complete."
                             else
                                 GD_REFRESH_TOKEN="$NEW_GD_REFRESH_TOKEN"
                                 save_config
-                                print_message "SUCCESS" "Refresh Token успешно обновлен."
+                                print_message "SUCCESS" "Refresh Token has been successfully updated."
                             fi
                             ;;
                         4)
                             echo
-                            echo "   📁 Чтобы указать папку Google Drive:"
-                            echo "   1. Создайте и откройте нужную папку в браузере."
-                            echo "   2. Посмотрите на ссылку в адресной строке,она выглядит так:"
+                            echo "📁 To specify the Google Drive folder:"
+                            echo "1. Create and open the desired folder in the browser."
+                            echo "2. Look at the link in the address bar, it looks like this:"
                             echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-                            echo "   3. Скопируйте часть после /folders/ — это и есть Folder ID:"
-                            echo "   4. Если оставить поле пустым — бекап будет отправлен в корневую папку Google Drive."
+                            echo "3. Copy the part after /folders/ - this is the Folder ID:"
+                            echo "4. If you leave the field empty, the backup will be sent to the root folder of Google Drive."
                             echo
-                            read -rp "   Введите новый Google Drive Folder ID (оставьте пустым для корневой папки): " NEW_GD_FOLDER_ID
+                            read -rp "Enter your new Google Drive Folder ID (leave blank for root folder):" NEW_GD_FOLDER_ID
                             GD_FOLDER_ID="$NEW_GD_FOLDER_ID"
                             save_config
-                            print_message "SUCCESS" "Google Drive Folder ID успешно обновлен."
+                            print_message "SUCCESS" "Google Drive Folder ID has been successfully updated."
                             ;;
                         0) break ;;
-                        *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+                        *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ;;
                     esac
                     echo ""
-                    read -rp "Нажмите Enter для продолжения..."
+                    read -rp "Press Enter to continue..."
                 done
                 ;;
             3)
                 clear
-                echo -e "${GREEN}${BOLD}Имя пользователя PostgreSQL${RESET}"
+                echo -e "${GREEN}${BOLD}PostgreSQL username${RESET}"
                 echo ""
-                print_message "INFO" "Текущее имя пользователя PostgreSQL: ${BOLD}${DB_USER}${RESET}"
+                print_message "INFO" "Current PostgreSQL username: ${BOLD}${DB_USER}${RESET}"
                 echo ""
-                read -rp "   Введите новое имя пользователя PostgreSQL (по умолчанию postgres): " NEW_DB_USER
+                read -rp "Enter a new PostgreSQL username (postgres by default):" NEW_DB_USER
                 DB_USER="${NEW_DB_USER:-postgres}"
                 save_config
-                print_message "SUCCESS" "Имя пользователя PostgreSQL успешно обновлено на ${BOLD}${DB_USER}${RESET}."
+                print_message "SUCCESS" "The PostgreSQL username was successfully updated to ${BOLD}${DB_USER}${RESET}."
                 echo ""
-                read -rp "Нажмите Enter для продолжения..."
+                read -rp "Press Enter to continue..."
                 ;;
             4)
                 clear
-                echo -e "${GREEN}${BOLD}Путь Remnawave${RESET}"
+                echo -e "${GREEN}${BOLD}Remnawave Path${RESET}"
                 echo ""
-                print_message "INFO" "Текущий путь Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                print_message "INFO" "Current Remnawave path: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                 echo ""
-                print_message "ACTION" "Выберите новый путь для панели Remnawave:"
+                print_message "ACTION" "Select a new path for the Remnawave panel:"
                 echo " 1. /opt/remnawave"
                 echo " 2. /root/remnawave"
                 echo " 3. /opt/stacks/remnawave"
-                echo " 4. Указать свой путь"
+                echo "4. Show your path"
                 echo ""
-                echo " 0. Назад"
+                echo "0. Back"
                 echo ""
 
                 local new_remnawave_path_choice
                 while true; do
-                    read -rp " ${GREEN}[?]${RESET} Выберите вариант: " new_remnawave_path_choice
+                    read -rp "${GREEN}[?]${RESET} Select an option:" new_remnawave_path_choice
                     case "$new_remnawave_path_choice" in
                     1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
                     2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
                     3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
                     4) 
                         echo ""
-                        print_message "INFO" "Введите полный путь к директории панели Remnawave:"
-                        read -rp " Путь: " new_custom_remnawave_path
+                        print_message "INFO" "Enter the full path to the Remnawave panel directory:"
+                        read -rp "Path:" new_custom_remnawave_path
         
                         if [[ -z "$new_custom_remnawave_path" ]]; then
-                            print_message "ERROR" "Путь не может быть пустым."
+                            print_message "ERROR" "The path cannot be empty."
                             echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
+                            read -rp "Press Enter to continue..."
                             continue
                         fi
         
                         if [[ ! "$new_custom_remnawave_path" = /* ]]; then
-                            print_message "ERROR" "Путь должен быть абсолютным (начинаться с /)."
+                            print_message "ERROR" "The path must be absolute (starting with /)."
                             echo ""
-                            read -rp "Нажмите Enter, чтобы продолжить..."
+                            read -rp "Press Enter to continue..."
                             continue
                         fi
         
                         new_custom_remnawave_path="${new_custom_remnawave_path%/}"
         
                         if [[ ! -d "$new_custom_remnawave_path" ]]; then
-                            print_message "WARN" "Директория ${BOLD}${new_custom_remnawave_path}${RESET} не существует."
-                            read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_new_custom_path
+                            print_message "WARN" "The directory ${BOLD}${new_custom_remnawave_path}${RESET} does not exist."
+                            read -rp "$(echo -e "${GREEN}[?]${RESET} Continue with this path? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:")" confirm_new_custom_path
                             if [[ "$confirm_new_custom_path" != "y" ]]; then
                                 echo ""
-                                read -rp "Нажмите Enter, чтобы продолжить..."
+                                read -rp "Press Enter to continue..."
                                 continue
                             fi
                         fi
         
                         REMNALABS_ROOT_DIR="$new_custom_remnawave_path"
-                        print_message "SUCCESS" "Установлен новый кастомный путь: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                        print_message "SUCCESS" "New custom path set: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                         break 
                         ;;
                     0) 
                         return
                         ;;
-                    *) print_message "ERROR" "Неверный ввод." ;;
+                    *) print_message "ERROR" "Invalid input." ;;
                     esac
                 done
                 save_config
-                print_message "SUCCESS" "Путь Remnawave успешно обновлен на ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
+                print_message "SUCCESS" "Remnawave path successfully updated to ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
                 echo ""
-                read -rp "Нажмите Enter для продолжения..."
+                read -rp "Press Enter to continue..."
                 ;;
             0) break ;;
-            *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ;;
+            *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ;;
         esac
         echo ""
     done
@@ -2210,30 +2210,30 @@ main_menu() {
         clear
         echo -e "${GREEN}${BOLD}REMNAWAVE BACKUP & RESTORE by distillium${RESET} "
         if [[ "$UPDATE_AVAILABLE" == true ]]; then
-            echo -e "${BOLD}${LIGHT_GRAY}Версия: ${VERSION} ${RED}доступно обновление${RESET}"
+            echo -e "${BOLD}${LIGHT_GRAY}Version: ${VERSION} ${RED}update available${RESET}"
         else
-            echo -e "${BOLD}${LIGHT_GRAY}Версия: ${VERSION}${RESET}"
+            echo -e "${BOLD}${LIGHT_GRAY}Version: ${VERSION}${RESET}"
         fi
         echo ""
-        echo "   1. Создание бэкапа вручную"
-        echo "   2. Восстановление из бэкапа"
+        echo "1. Create a backup manually"
+        echo "2. Restoring from backup"
         echo ""
-        echo "   3. Настройка бэкапа Telegram бота"
-        echo "   4. Настройка автоматической отправки и уведомлений"
-        echo "   5. Настройка способа отправки"
-        echo "   6. Настройка конфигурации скрипта"
+        echo "3. Setting up a Telegram bot backup"
+        echo "4. Setting up automatic sending and notifications"
+        echo "5. Setting up the sending method"
+        echo "6. Setting up the script configuration"
         echo ""
-        echo "   7. Обновление скрипта"
-        echo "   8. Удаление скрипта"
+        echo "7. Script update"
+        echo "8. Deleting the script"
         echo ""
-        echo "   0. Выход"
-        echo -e "   —  Быстрый запуск: ${BOLD}${GREEN}rw-backup${RESET} доступен из любой точки системы"
+        echo "0. Exit"
+        echo -e "— Quick start: ${BOLD}${GREEN}rw-backup${RESET} is available from anywhere in the system"
         echo ""
 
-        read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
+        read -rp "${GREEN}[?]${RESET} Select an item:" choice
         echo ""
         case $choice in
-            1) create_backup ; read -rp "Нажмите Enter для продолжения..." ;;
+            1) create_backup ; read -rp "Press Enter to continue..." ;;
             2) restore_backup ;;
             3) configure_bot_backup ;;
             4) setup_auto_send ;;
@@ -2241,24 +2241,24 @@ main_menu() {
             6) configure_settings ;;
             7) update_script ;;
             8) remove_script ;;
-            0) echo "Выход..."; exit 0 ;;
-            *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите один из предложенных пунктов." ; read -rp "Нажмите Enter для продолжения..." ;;
+            0) echo "Exit..."; exit 0 ;;
+            *) print_message "ERROR" "Invalid input. Please select one of the suggested items." ; read -rp "Press Enter to continue..." ;;
         esac
     done
 }
 
 if ! command -v jq &> /dev/null; then
-    print_message "INFO" "Установка пакета 'jq' для парсинга JSON..."
+    print_message "INFO" "Installing package "jq" for JSON parsing..."
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}❌ Ошибка: Для установки 'jq' требуются права root. Пожалуйста, установите 'jq' вручную (например, 'sudo apt-get install jq') или запустите скрипт с sudo.${RESET}"
+        echo -e "${RED}❌ Error: Installing "jq" requires root privileges. Please install "jq" manually (for example: "sudo apt-get install jq") or run the script with sudo.${RESET}"
         exit 1
     fi
     if command -v apt-get &> /dev/null; then
         apt-get update -qq > /dev/null 2>&1
-        apt-get install -y jq > /dev/null 2>&1 || { echo -e "${RED}❌ Ошибка: Не удалось установить 'jq'.${RESET}"; exit 1; }
-        print_message "SUCCESS" "'jq' успешно установлен."
+        apt-get install -y jq > /dev/null 2>&1 || { echo -e "${RED}❌ Error: Failed to install "jq".${RESET}"; exit 1; }
+        print_message "SUCCESS" ""jq" installed successfully."
     else
-        print_message "ERROR" "Не удалось найти менеджер пакетов apt-get. Установите 'jq' вручную."
+        print_message "ERROR" "apt-get package manager not found. Please install "jq" manually."
         exit 1
     fi
 fi
@@ -2278,6 +2278,6 @@ elif [[ "$1" == "update" ]]; then
 elif [[ "$1" == "remove" ]]; then
     remove_script
 else
-    echo -e "${RED}❌ Неверное использование. Доступные команды: ${BOLD}${0} [backup|restore|update|remove]${RESET}${RESET}"
+    echo -e "${RED}❌ Incorrect usage. Available commands: ${BOLD}${0} [backup|restore|update|remove]${RESET}${RESET}"
     exit 1
 fi

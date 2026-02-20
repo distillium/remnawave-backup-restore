@@ -1,116 +1,94 @@
-<p aling="center"><a href="https://github.com/distillium/remnawave-backup-restore">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="./media/logo.png" />
-   <source media="(prefers-color-scheme: light)" srcset="./media/logo-black.png" />
-   <img alt="Backup & Restore" src="https://github.com/distillium/remnawave-backup-restore" />
- </picture>
-</a></p>
+<p align="center">
+  <a href="https://github.com/distillium/remnawave-backup-restore">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./media/logo.png" />
+      <source media="(prefers-color-scheme: light)" srcset="./media/logo-black.png" />
+      <img alt="Remnawave Backup & Restore" src="./media/logo-black.png" width="520" />
+    </picture>
+  </a>
+</p>
 
 > [!CAUTION]
-> **СКРИПТ ВЫПОЛНЯЕТ РЕЗЕРВНОЕ КОПИРОВАНИЕ И ВОССТАНОВЛЕНИЕ ВСЕЙ ДИРЕКТОРИИ И БАЗЫ ДАННЫХ REMNAWAVE, А ТАКЖЕ (ОПЦИОНАЛЬНО) TELEGRAM SHOP. РЕЗЕРВНОЕ КОПИРОВАНИЕ И ВОССТАНОВЛЕНИЕ ЛЮБЫХ ДРУГИХ СЕРВИСОВ И КОНФИГУРАЦИЙ ПОЛНОСТЬЮ НАХОДЯТСЯ В ЗОНЕ ОТВЕТСТВЕННОСТИ ПОЛЬЗОВАТЕЛЯ. РЕКОМЕНДУЕТСЯ ВНИМАТЕЛЬНО СЛЕДОВАТЬ ИНСТРУКЦИЯМ ПО ХОДУ ВЫПОЛНЕНИЯ СКРИПТА ПЕРЕД ВЫПОЛНЕНИЕМ ЛЮБЫХ КОМАНД.**
+> This script creates and restores backups for the **Remnawave directory and PostgreSQL database**, and can optionally include a supported **Telegram Shop** installation.
+> Backing up or restoring any additional services is **your responsibility**.
 
 <details>
-<summary>🌌 Предпросмотр главного меню</summary>
+<summary>🌌 Main menu preview</summary>
 
 ![screenshot](./media/preview.png)
+
 </details>
 
-## Функции:
-- интерактивное меню
-- уведомления напрямую в Telegram бота или в топик группы с прикрепленным бэкапом
-- уведомления об актуальной версии скрипта
-- отправка бекапа в Google Drive (опционально)
-- создание бэкапа вручную
-- настройка автоматического бекапа по расписанию
-- восстановление из бэкапа
-- изменение конфигурации
-- обновление скрипта
-- удаление скрипта
-- реализована политика хранения бэкапов (7 дней)
+## Features
 
-## Дополнительные инструкции для методов миграции:
+- Interactive TUI menu
+- One-off backup creation
+- Backup restore workflow
+- Scheduled automatic backups (cron)
+- Delivery to Telegram (chat or topic)
+- Optional delivery to Google Drive
+- Optional Telegram Shop backup/restore
+- Script self-update flow
+- Backup retention policy (default: 7 days)
 
-<details>
-  <summary>📝 Только панель: переход на новый сервер</summary>
-  
-- отредактировать в Cloudflare  поддомен панели на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- произвести восстановление директории и БД
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с ними. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+## Supported migration scenarios
+
+### 1) Panel only → new server
+
+1. Point panel DNS (and related service subdomains, if needed) to the new IP.
+2. Restore directory and database.
+3. Re-issue TLS certificates, if required.
+4. Access URL/password remain from the original panel.
+5. Update node firewall rule for service port (default `2222`) on every node:
 
 ```bash
 ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+### 2) Panel + root node → new server
 
-</details>
+1. Update DNS for both panel and the root node.
+2. Restore directory and database.
+3. Re-issue TLS certificates, if required.
+4. Temporarily enable panel access via `8443` (if your setup requires it).
+5. In panel node settings, replace old root-node address with the new one.
+6. Disable temporary `8443` access.
+7. Update port `2222` firewall allow rules on external nodes (same command as above).
 
-<details>
-  <summary>📝 Панель+нода: переход на новый сервер</summary>
-  
-- отредактировать в Cloudflare  поддомены панели и "корневой" ноды (которая стоит вместе с панелью) на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- произвести восстановление директории и БД
-- включить доступ к панели через порт 8443 (скрипт от eGames, пункт «Управление доступом к панели»)
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- в управлении нодами найдите корневую, которая стоит вместе с панелью. В ней указан адрес старого сервера. Измените его на новый - нода активируется автоматически
-- теперь закрываем доступ к панели через порт 8443 тем же образом, как открывали
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех внешних нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с ними. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+### 3) Panel + root node → panel only (same server)
 
-```bash
-ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
-```
+1. Restore directory and database.
+2. Remove old root node and linked inbound/host entries in panel.
+3. Remove root-node env file:
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
-
-</details>
-
-<details>
-  <summary>📝 Панель+нода: переход на "Только панель", на текущем сервере</summary>
-  
-- произвести восстановление директории и БД
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старую "корневую" ноду из панели и связанные с ней инбаунд и хост
-- удалить файл `.env-node` с сервера панели командой:
-  
 ```bash
 rm /opt/remnawave/.env-node
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+### 4) Panel + root node → panel only (new server)
 
-</details>
+1. Update panel DNS to the new IP.
+2. Restore directory and database.
+3. Re-issue TLS certificates, if required.
+4. Remove old root node and linked inbound/host entries.
+5. Remove `.env-node` on panel host:
 
-<details>
-  <summary>📝 Панель+нода: переход на "Только панель", на новый сервер</summary>
-
-- отредактировать в Cloudflare  поддомены панели на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- произвести восстановление директории и БД
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старую "корневую" ноду из панели и связанные с ней инбаунд и хост
-- удалить файл `.env-node` с сервера панели командой:
-  
 ```bash
 rm /opt/remnawave/.env-node
 ```
 
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с нодами. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+6. Update node firewall rules for port `2222` to new panel IP.
+
+---
+
+## Installation (requires root)
 
 ```bash
-ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
+curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh \
+  && chmod +x ~/backup-restore.sh \
+  && ~/backup-restore.sh
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
-  
-</details>
+## Command
 
-## Установка (требует root):
-
-```
-curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh && chmod +x ~/backup-restore.sh && ~/backup-restore.sh
-```
-## Команды:
-- `rw-backup` — быстрый доступ в меню из любой точки системы
+- `rw-backup` — quick menu entrypoint from anywhere in the system

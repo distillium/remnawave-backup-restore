@@ -1,33 +1,33 @@
-name: '🐛 Сообщение о проблеме'
+name: '🐛 Bug report (RU template translated to EN)'
 title: '[Bug-report] '
-description: Сообщите о проблеме или нестандартном поведении
+description: Report a problem or unexpected behavior
 labels: ['bug']
 
 body:
   - type: checkboxes
     id: checklist
     attributes:
-      label: '⚠️ Обязательные условия'
-      description: Прежде чем создавать новый issue, убедитесь, что вы выполнили следующее
+      label: '⚠️ Required checks'
+      description: Before opening a new issue, confirm all items below
       options:
-        - label: Я прочитал [README](https://github.com/distillium/remnawave-backup-restore/blob/main/README.md)
-        - label: Я проверил существующие [Issues](https://github.com/distillium/remnawave-backup-restore/issues)
-        - label: Я обновился до [последнего релиза](https://github.com/distillium/remnawave-backup-restore/releases)
+        - label: I read the [README](https://github.com/distillium/remnawave-backup-restore/blob/main/README.md)
+        - label: I checked existing [Issues](https://github.com/distillium/remnawave-backup-restore/issues)
+        - label: I updated to the [latest release](https://github.com/distillium/remnawave-backup-restore/releases)
 
   - type: input
     id: os
     attributes:
-      label: '💿 Операционная система'
-      description: Укажите используемую ОС и её версию
-      placeholder: Например, Ubuntu 24.04 / Debian 12
+      label: '💿 Operating system'
+      description: Specify OS name and version
+      placeholder: 'For example: Ubuntu 24.04 / Debian 12'
     validations:
       required: true
 
   - type: dropdown
     id: installation_method
     attributes:
-      label: '📦 Метод установки'
-      description: Как вы выполнили установку?
+      label: '📦 Installation method'
+      description: How did you install the script?
       options:
         - root user
         - other user
@@ -37,32 +37,34 @@ body:
   - type: textarea
     id: problem_description
     attributes:
-      label: '❔ Описание проблемы'
-      description: Что произошло и что вы ожидали?
-      placeholder: Подробно опишите проблему
+      label: '❔ Problem description'
+      description: What happened and what did you expect?
+      placeholder: Describe the issue in detail
     validations:
       required: true
 
   - type: textarea
     id: reproduction_steps
     attributes:
-      label: '⚙️ Шаги для воспроизведения'
-      description: Перечислите точные шаги для воспроизведения ошибки
+      label: '⚙️ Steps to reproduce'
+      description: Provide exact reproduction steps
       placeholder: |
-        Опишите шаги для воспроизведения проблемы, чтобы мы могли её отладить
+        1. Run ...
+        2. Open ...
+        3. Observe ...
     validations:
       required: true
 
   - type: textarea
     id: logs_screenshots
     attributes:
-      label: '📎 Логи или скриншоты'
-      description: Вставьте логи или прикрепите скриншоты, чтобы помочь нам понять проблему
-      placeholder: Вставьте логи или добавьте скриншоты здесь
+      label: '📎 Logs or screenshots'
+      description: Paste logs and/or attach screenshots
+      placeholder: Paste logs or screenshots here
 
   - type: textarea
     id: additional_info
     attributes:
-      label: 'ℹ️ Дополнительная информация'
-      description: Всё, что нам ещё нужно знать
-      placeholder: Прочие детали, которые помогут в отладке
+      label: 'ℹ️ Additional context'
+      description: Anything else we should know
+      placeholder: Additional details helpful for debugging

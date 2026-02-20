@@ -1,24 +1,24 @@
-name: '🌠 Запрос функции'
-description: 'Новая функция или предложение'
+name: '🌠 Feature request (RU template translated to EN)'
+description: 'Suggest a new feature or improvement'
 title: '[Request] '
-labels: ['enchancement']
+labels: ['enhancement']
 
 body:
   - type: textarea
     attributes:
-      label: '🥰 Описание запроса'
-      description: Пожалуйста, добавьте чёткое и краткое описание.
+      label: '🥰 Request summary'
+      description: Provide a clear and concise description.
     validations:
       required: true
 
   - type: textarea
     attributes:
-      label: '🧐 Предлагаемое решение'
-      description: Опишите желаемое решение чётко и кратко.
+      label: '🧐 Proposed solution'
+      description: Describe the expected behavior or implementation approach.
     validations:
       required: true
 
   - type: textarea
     attributes:
-      label: 'ℹ️ Дополнительная информация'
-      description: Добавьте сюда любой дополнительный контекст по проблеме.
+      label: 'ℹ️ Additional context'
+      description: Add any extra context, examples, or references.
