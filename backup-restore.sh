@@ -118,7 +118,7 @@ configure_bot_backup() {
             if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
                 print_message "WARN" "Attention: The panel backup is also skipped (nothing is backed up!)"
             else
-                print_message "INFO" "Mode: backup only Remnawave panels"
+                print_message "INFO" "Mode: Remnawave panel backup only"
             fi
         fi
         echo ""
@@ -128,7 +128,7 @@ configure_bot_backup() {
         if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
             if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
                 if [[ "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    echo "2. Enable panel backup back (Panel + Bot mode)"
+                    echo "2. Re-enable panel backup (Panel + Bot mode)"
                 fi
             else
                 echo "2. Exclude panel backup (Bot Only Mode)"
@@ -230,7 +230,7 @@ configure_bot_backup() {
 
                 if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
                     print_message "WARN" "Currently, panel backups are also disabled in this mode."
-                    read -rp " $(echo -e "${GREEN}[?]${RESET} Do you want to enable panel backup back? (y/n):")" restore_p
+                    read -rp " $(echo -e "${GREEN}[?]${RESET} Re-enable panel backup? (y/n):")" restore_p
                     if [[ "$restore_p" =~ ^[yY]$ ]]; then
                         SKIP_PANEL_BACKUP="false"
                         print_message "SUCCESS" "The panel backup has been restored."
@@ -299,7 +299,7 @@ create_bot_backup() {
     
     if [[ -z "$BOT_CONTAINER_NAME" ]]; then
         print_message "ERROR" "Unknown bot: $BOT_BACKUP_SELECTED"
-        print_message "INFO" "We continue creating a backup without the bot..."
+        print_message "INFO" "Continuing backup creation without Telegram Shop..."
         return 0
     fi
 
@@ -313,7 +313,7 @@ create_bot_backup() {
     
     print_message "INFO" "Creating a PostgreSQL bot dump..."
     if ! docker exec -t "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
-        print_message "ERROR" "Error creating a PostgreSQL bot dump. We continue without a bot backup..."
+        print_message "ERROR" "Failed to create Telegram Shop PostgreSQL dump. Continuing without Telegram Shop backup..."
         return 0
     fi
     
@@ -355,7 +355,7 @@ restore_bot_backup() {
     check_docker_installed || return 1
 
     clear
-    print_message "INFO" "A Telegram bot backup was found in the archive."
+    print_message "INFO" "Telegram Shop backup data detected in the archive."
     echo ""
     read -rp "$(echo -e "${GREEN}[?]${RESET} Restore Telegram bot? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}:")" restore_bot_confirm
     
@@ -365,7 +365,7 @@ restore_bot_backup() {
     fi
     
     echo ""
-    print_message "ACTION" "What bot was in the backup?"
+    print_message "ACTION" "Which Telegram Shop variant is included in this backup?"
     echo "1. Bot from Jesus (remnawave-telegram-shop)"
     echo "2. Bot from Machka (remnawave-tg-shop)"
     echo "3. Bot from Snoups (remnashop)"
@@ -1056,7 +1056,7 @@ get_google_access_token() {
     if [[ -z "$access_token" || "$access_token" == "null" ]]; then
         local error_msg=$(echo "$token_response" | jq -r .error_description 2>/dev/null)
         print_message "ERROR" "Failed to obtain Access Token for Google Drive. The Refresh Token may be outdated or invalid. Error: ${error_msg:-Unknown error}."
-        print_message "ACTION" "Please reconfigure Google Drive in the "Set up sending method" menu."
+        print_message "ACTION" "Please reconfigure Google Drive in the 'Set up sending method' menu."
         return 1
     fi
     echo "$access_token"
@@ -1106,7 +1106,7 @@ send_google_drive_document() {
 }
 
 create_backup() {
-    print_message "INFO" "I'm starting the process of creating a backup..."
+    print_message "INFO" "Starting backup creation..."
     echo ""
     
     REMNAWAVE_VERSION=$(get_remnawave_version)
@@ -1123,7 +1123,7 @@ create_backup() {
     BACKUP_ITEMS=()
     
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-        print_message "INFO" "I'm skipping the Remnawave panel backup."
+        print_message "INFO" "Skipping Remnawave panel backup."
     else
         if ! docker inspect remnawave-db > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
             echo -e "${RED}❌ Error: Container ${BOLD}'remnawave-db'${RESET} not found or not running. Cannot create a database backup.${RESET}"
@@ -1265,7 +1265,7 @@ create_backup() {
     
     echo ""
     
-    print_message "INFO" "Applying a backup retention policy (we leave for the last ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} days)..."
+    print_message "INFO" "Applying backup retention policy (keeping the last ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} days)..."
     find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
     print_message "SUCCESS" "The retention policy has been applied. Old backups have been deleted."
     
@@ -1304,8 +1304,8 @@ setup_auto_send() {
             print_message "INFO" "Auto-send ${BOLD}disabled${RESET}."
         fi
         echo ""
-        echo "1. Enable/overwrite automatic sending of backups"
-        echo "2. Disable automatic sending of backups"
+        echo "1. Enable or overwrite automatic backup schedule"
+        echo "2. Disable automatic backup schedule"
         echo "0. Return to main menu"
         echo ""
         read -rp "${GREEN}[?]${RESET} Select an item:" choice
@@ -1802,7 +1802,7 @@ remove_script() {
 configure_upload_method() {
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}Configuring the method for sending backups${RESET}"
+        echo -e "${GREEN}${BOLD}Configuring backup delivery method${RESET}"
         echo ""
         print_message "INFO" "Current method: ${BOLD}${UPLOAD_METHOD^^}${RESET}"
         echo ""
@@ -2216,9 +2216,9 @@ main_menu() {
         fi
         echo ""
         echo "1. Create a backup manually"
-        echo "2. Restoring from backup"
+        echo "2. Restore from backup"
         echo ""
-        echo "3. Setting up a Telegram bot backup"
+        echo "3. Configure Telegram Shop backup"
         echo "4. Setting up automatic sending and notifications"
         echo "5. Setting up the sending method"
         echo "6. Setting up the script configuration"
