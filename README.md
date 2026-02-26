@@ -6,111 +6,111 @@
  </picture>
 </a></p>
 
+**🇬🇧 English** | [🇷🇺 Русский](README-RU.md)
+
 > [!CAUTION]
-> **СКРИПТ ВЫПОЛНЯЕТ РЕЗЕРВНОЕ КОПИРОВАНИЕ И ВОССТАНОВЛЕНИЕ ВСЕЙ ДИРЕКТОРИИ И БАЗЫ ДАННЫХ REMNAWAVE, А ТАКЖЕ (ОПЦИОНАЛЬНО) TELEGRAM SHOP. РЕЗЕРВНОЕ КОПИРОВАНИЕ И ВОССТАНОВЛЕНИЕ ЛЮБЫХ ДРУГИХ СЕРВИСОВ И КОНФИГУРАЦИЙ ПОЛНОСТЬЮ НАХОДЯТСЯ В ЗОНЕ ОТВЕТСТВЕННОСТИ ПОЛЬЗОВАТЕЛЯ. РЕКОМЕНДУЕТСЯ ВНИМАТЕЛЬНО СЛЕДОВАТЬ ИНСТРУКЦИЯМ ПО ХОДУ ВЫПОЛНЕНИЯ СКРИПТА ПЕРЕД ВЫПОЛНЕНИЕМ ЛЮБЫХ КОМАНД.**
+> **THIS SCRIPT PERFORMS BACKUP AND RESTORE OF THE ENTIRE REMNAWAVE DIRECTORY AND DATABASE, AS WELL AS (OPTIONALLY) TELEGRAM SHOP. BACKUP AND RESTORE OF ANY OTHER SERVICES AND CONFIGURATIONS IS ENTIRELY THE USER'S RESPONSIBILITY. IT IS RECOMMENDED TO CAREFULLY FOLLOW THE INSTRUCTIONS DURING SCRIPT EXECUTION BEFORE RUNNING ANY COMMANDS.**
 
 <details>
-<summary>🌌 Предпросмотр главного меню</summary>
+<summary>🌌 Main menu preview</summary>
 
 ![screenshot](./media/preview.png)
 </details>
 
-## Функции:
-- интерактивное меню
-- уведомления напрямую в Telegram бота или в топик группы с прикрепленным бэкапом
-- уведомления об актуальной версии скрипта
-- отправка бекапа в Google Drive (опционально)
-- создание бэкапа вручную
-- настройка автоматического бекапа по расписанию
-- восстановление из бэкапа
-- изменение конфигурации
-- обновление скрипта
-- удаление скрипта
-- реализована политика хранения бэкапов (7 дней)
+## Features:
+- interactive menu
+- manual and scheduled automatic backup creation
+- backup/restore in panel+bot, panel only, and bot only modes
+- external PostgreSQL support
+- notifications directly to Telegram bot or group topic with attached backup
+- script version update notifications
+- backup size check before sending to TG and limit exceeded notification
+- backup upload to Google Drive (optional)
+- server-side backup retention policy (7 days)
 
-## Дополнительные инструкции для методов миграции:
+## Additional migration instructions:
 
 <details>
-  <summary>📝 Только панель: переход на новый сервер</summary>
+  <summary>📝 Panel only: migrating to a new server</summary>
   
-- отредактировать в Cloudflare  поддомен панели на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- произвести восстановление директории и БД
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с ними. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+- edit the panel subdomain in Cloudflare to point to the new IP address. Also update subdomains of other services if they will be hosted on the new server
+- perform directory and database restore
+- restore domain certificates on your own (if required)
+- the access link and password will be from the old panel that was previously backed up
+- delete the old rule for the service port (default 2222) on all nodes and create a new one. This is necessary for the panel with the new IP address to communicate with them. Run the command on each node, replacing `OLD_IP` and `NEW_IP` with your own:
 
 ```bash
 ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+- you're all set! All that's left is to install and configure any other services you need (e.g. kuma, beszel, etc.)
 
 </details>
 
 <details>
-  <summary>📝 Панель+нода: переход на новый сервер</summary>
+  <summary>📝 Panel+node: migrating to a new server</summary>
   
-- отредактировать в Cloudflare  поддомены панели и "корневой" ноды (которая стоит вместе с панелью) на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- произвести восстановление директории и БД
-- включить доступ к панели через порт 8443 (скрипт от eGames, пункт «Управление доступом к панели»)
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- в управлении нодами найдите корневую, которая стоит вместе с панелью. В ней указан адрес старого сервера. Измените его на новый - нода активируется автоматически
-- теперь закрываем доступ к панели через порт 8443 тем же образом, как открывали
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех внешних нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с ними. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+- edit the panel and "root" node (co-located with the panel) subdomains in Cloudflare to point to the new IP address. Also update subdomains of other services if they will be hosted on the new server
+- restore domain certificates on your own (if required)
+- perform directory and database restore
+- enable panel access via port 8443 (eGames script, "Panel access management" option)
+- the access link and password will be from the old panel that was previously backed up
+- in node management, find the root node co-located with the panel. It contains the old server address. Change it to the new one — the node will activate automatically
+- now close panel access via port 8443 the same way you opened it
+- delete the old rule for the service port (default 2222) on all external nodes and create a new one. This is necessary for the panel with the new IP address to communicate with them. Run the command on each node, replacing `OLD_IP` and `NEW_IP` with your own:
 
 ```bash
 ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+- you're all set! All that's left is to install and configure any other services you need (e.g. kuma, beszel, etc.)
 
 </details>
 
 <details>
-  <summary>📝 Панель+нода: переход на "Только панель", на текущем сервере</summary>
+  <summary>📝 Panel+node: switching to "Panel only" on the current server</summary>
   
-- произвести восстановление директории и БД
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старую "корневую" ноду из панели и связанные с ней инбаунд и хост
-- удалить файл `.env-node` с сервера панели командой:
+- perform directory and database restore
+- the access link and password will be from the old panel that was previously backed up
+- delete the old "root" node from the panel along with its associated inbound and host
+- delete the `.env-node` file from the panel server:
   
 ```bash
 rm /opt/remnawave/.env-node
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+- you're all set! All that's left is to install and configure any other services you need (e.g. kuma, beszel, etc.)
 
 </details>
 
 <details>
-  <summary>📝 Панель+нода: переход на "Только панель", на новый сервер</summary>
+  <summary>📝 Panel+node: switching to "Panel only" on a new server</summary>
 
-- отредактировать в Cloudflare  поддомены панели на новый IP-адрес. А также поддомены остальных сервисов, если они будут размещены на новом сервере
-- самостоятельно восстановить сертификаты для домена (если требуется)
-- произвести восстановление директории и БД
-- ссылка доступа и пароль будут от старой панели, с которой ранее делался бэкап
-- удалить старую "корневую" ноду из панели и связанные с ней инбаунд и хост
-- удалить файл `.env-node` с сервера панели командой:
+- edit the panel subdomains in Cloudflare to point to the new IP address. Also update subdomains of other services if they will be hosted on the new server
+- restore domain certificates on your own (if required)
+- perform directory and database restore
+- the access link and password will be from the old panel that was previously backed up
+- delete the old "root" node from the panel along with its associated inbound and host
+- delete the `.env-node` file from the panel server:
   
 ```bash
 rm /opt/remnawave/.env-node
 ```
 
-- удалить старое правило для сервисного порта (по умолчанию 2222) на всех нодах и создать новое. Это нужно для того, чтобы панель с новым IP-адресом смогла общаться с нодами. Выполните команду на каждой ноде, предварительно заменив `OLD_IP` и `NEW_IP` на свои:
+- delete the old rule for the service port (default 2222) on all nodes and create a new one. This is necessary for the panel with the new IP address to communicate with the nodes. Run the command on each node, replacing `OLD_IP` and `NEW_IP` with your own:
 
 ```bash
 ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any port 2222
 ```
 
-- вы великолепны! Остается доустановить и настроить остальные нужные Вам сервисы (например kuma, beszel и прочее)
+- you're all set! All that's left is to install and configure any other services you need (e.g. kuma, beszel, etc.)
   
 </details>
 
-## Установка (требует root):
+## Installation (requires root):
 
 ```
 curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh && chmod +x ~/backup-restore.sh && ~/backup-restore.sh
 ```
-## Команды:
-- `rw-backup` — быстрый доступ в меню из любой точки системы
+## Commands:
+- `rw-backup` — quick menu access from anywhere in the system
