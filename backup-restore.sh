@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="2.3.0"
+VERSION="2.4.0"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -526,7 +526,7 @@ restore_bot_backup() {
     if [[ -d "$restore_path" ]]; then
         print_message "INFO" "$(t rbot_exists_stop)"
     
-        if cd "$restore_path" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]]); then
+        if cd "$restore_path" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]] || [[ -f "compose.yml" ]] || [[ -f "compose.yaml" ]]); then
             print_message "INFO" "$(t rbot_stopping)"
             docker compose down 2>/dev/null || print_message "WARN" "$(t rbot_stop_fail)"
         else
@@ -612,7 +612,7 @@ restore_bot_backup() {
         return 1
     fi
     
-    if [[ ! -f "docker-compose.yml" && ! -f "docker-compose.yaml" ]]; then
+    if [[ ! -f "docker-compose.yml" && ! -f "docker-compose.yaml" && ! -f "compose.yml" && ! -f "compose.yaml" ]]; then
     print_message "ERROR" "$(t rbot_no_yml)"
     return 1
     fi
@@ -745,21 +745,7 @@ load_or_create_config() {
         local config_updated=false
 
         if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-            print_message "WARN" "$(t cfg_tg_missing)"
-            print_message "ACTION" "$(t cfg_tg_enter)"
-            echo ""
-            print_message "INFO" "$(t cfg_create_bot)"
-            [[ -z "$BOT_TOKEN" ]] && read -rp "    $(t cfg_enter_token)" BOT_TOKEN
-            echo ""
-            print_message "INFO" "$(t cfg_chatid_desc)"
-            echo -e "       $(t cfg_chatid_help)"
-            [[ -z "$CHAT_ID" ]] && read -rp "    $(t cfg_enter_chatid)" CHAT_ID
-            echo ""
-            print_message "INFO" "$(t cfg_thread_info)"
-            echo -e "       $(t cfg_thread_empty)"
-            read -rp "    $(t cfg_enter_thread)" TG_MESSAGE_THREAD_ID
-            echo ""
-            config_updated=true
+            print_message "WARN" "$(t cfg_tg_not_configured)"
         fi
 
         if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$DB_USER" ]]; then
@@ -934,6 +920,8 @@ load_or_create_config() {
 
             print_message "INFO" "$(t cfg_tg_setup)"
             print_message "INFO" "$(t cfg_create_bot)"
+            print_message "INFO" "$(t cfg_tg_skip_hint)"
+            print_message "WARN" "$(t cfg_tg_skip_warn)"
             read -rp "    $(t cfg_enter_token)" BOT_TOKEN
             echo ""
             print_message "INFO" "$(t cfg_chatid_desc)"
@@ -1136,7 +1124,6 @@ send_telegram_message() {
     local parse_mode="${2:-MarkdownV2}"
 
     if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-        print_message "ERROR" "$(t tg_not_set)"
         return 1
     fi
 
@@ -1185,7 +1172,6 @@ send_telegram_document() {
     escaped_caption=$(escape_markdown_v2 "$caption")
 
     if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
-        print_message "ERROR" "$(t tg_doc_not_set)"
         return 1
     fi
 
@@ -1381,6 +1367,7 @@ DUMP_TYPE=$DUMP_TYPE
 DB_CONNECTION_TYPE=$DB_CONNECTION_TYPE
 DB_NAME=$DB_NAME
 BACKUP_VERSION=$VERSION
+PANEL_VERSION=$REMNAWAVE_VERSION
 TIMESTAMP=$TIMESTAMP
 METAEOF
     BACKUP_ITEMS+=("backup_meta.info")
@@ -1731,7 +1718,10 @@ restore_backup() {
         BACKUP_META_VERSION="${BACKUP_VERSION:-}"
         BACKUP_META_DB_NAME="${DB_NAME:-}"
         
-        print_message "INFO" "$(t rs_meta)${BOLD}${BACKUP_DUMP_TYPE}${RESET}, $(t rs_meta_ver)${BOLD}${BACKUP_META_VERSION:-$(t rs_meta_unknown)}${RESET}"
+        BACKUP_PANEL_VERSION="${PANEL_VERSION:-}"
+        print_message "INFO" "$(t rs_meta)${BOLD}${BACKUP_DUMP_TYPE}${RESET}"
+        print_message "INFO" "$(t rs_meta_ver)${BOLD}${BACKUP_META_VERSION:-$(t rs_meta_unknown)}${RESET}"
+        print_message "INFO" "$(t rs_meta_panel)${BOLD}${BACKUP_PANEL_VERSION:-$(t rs_meta_unknown)}${RESET}"
     else
         print_message "INFO" "$(t rs_no_meta)"
     fi
@@ -1848,9 +1838,7 @@ restore_backup() {
 
             if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
                 if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-                    if cd "$REMNALABS_ROOT_DIR" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]]); then
-                        docker compose down 2>/dev/null
-                    fi
+                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
                     cd ~
                     rm -rf "$REMNALABS_ROOT_DIR"
                 fi
@@ -1876,9 +1864,7 @@ restore_backup() {
                 echo ""
             else
                 if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-                    if cd "$REMNALABS_ROOT_DIR" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]]); then
-                        docker compose down 2>/dev/null
-                    fi
+                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
                     cd ~
                     rm -rf "$REMNALABS_ROOT_DIR"
                 fi
