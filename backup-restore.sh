@@ -2,13 +2,14 @@
 
 set -e
 
-VERSION="2.4.0"
+VERSION="3.0.0"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
 SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
+S3_RETAIN_DAYS=30
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR=""
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
@@ -17,6 +18,12 @@ GD_CLIENT_ID=""
 GD_CLIENT_SECRET=""
 GD_REFRESH_TOKEN=""
 GD_FOLDER_ID=""
+S3_ENDPOINT=""
+S3_ACCESS_KEY=""
+S3_SECRET_KEY=""
+S3_BUCKET=""
+S3_REGION=""
+S3_PREFIX=""
 UPLOAD_METHOD="telegram"
 DB_CONNECTION_TYPE="docker"
 DB_HOST=""
@@ -692,6 +699,14 @@ GD_CLIENT_ID="$GD_CLIENT_ID"
 GD_CLIENT_SECRET="$GD_CLIENT_SECRET"
 GD_REFRESH_TOKEN="$GD_REFRESH_TOKEN"
 GD_FOLDER_ID="$GD_FOLDER_ID"
+S3_ENDPOINT="$S3_ENDPOINT"
+S3_ACCESS_KEY="$S3_ACCESS_KEY"
+S3_SECRET_KEY="$S3_SECRET_KEY"
+S3_BUCKET="$S3_BUCKET"
+S3_REGION="$S3_REGION"
+S3_PREFIX="$S3_PREFIX"
+S3_RETAIN_DAYS="$S3_RETAIN_DAYS"
+RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 CRON_TIMES="$CRON_TIMES"
 REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 TG_MESSAGE_THREAD_ID="$TG_MESSAGE_THREAD_ID"
@@ -732,6 +747,14 @@ load_or_create_config() {
         DB_PASSWORD=${DB_PASSWORD:-}
         DB_SSL_MODE=${DB_SSL_MODE:-prefer}
         DB_POSTGRES_VERSION=${DB_POSTGRES_VERSION:-17}
+        S3_ENDPOINT=${S3_ENDPOINT:-}
+        S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+        S3_SECRET_KEY=${S3_SECRET_KEY:-}
+        S3_BUCKET=${S3_BUCKET:-}
+        S3_REGION=${S3_REGION:-}
+        S3_PREFIX=${S3_PREFIX:-}
+        S3_RETAIN_DAYS=${S3_RETAIN_DAYS:-30}
+        RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         LANG_CODE=${LANG_CODE:-}
         
         if [[ -z "$LANG_CODE" || ! -f "$TRANSLATIONS_DIR/$LANG_CODE.sh" ]]; then
@@ -817,6 +840,15 @@ load_or_create_config() {
             if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
                 print_message "WARN" "$(t cfg_gd_incomplete)"
                 print_message "WARN" "$(t cfg_gd_switch_tg)"
+                UPLOAD_METHOD="telegram"
+                config_updated=true
+            fi
+        fi
+
+        if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+            if [[ -z "$S3_BUCKET" || -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" ]]; then
+                print_message "WARN" "$(t cfg_s3_incomplete)"
+                print_message "WARN" "$(t cfg_s3_switch_tg)"
                 UPLOAD_METHOD="telegram"
                 config_updated=true
             fi
@@ -1273,6 +1305,107 @@ send_google_drive_document() {
     fi
 }
 
+install_aws_cli() {
+    if command -v aws &> /dev/null; then
+        return 0
+    fi
+    print_message "INFO" "$(t s3_installing_cli)"
+    if [[ $EUID -ne 0 ]]; then
+        print_message "ERROR" "$(t s3_cli_root)"
+        return 1
+    fi
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq > /dev/null 2>&1
+        apt-get install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+    elif command -v yum &> /dev/null; then
+        yum install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+    elif command -v dnf &> /dev/null; then
+        dnf install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+    else
+        print_message "ERROR" "$(t s3_cli_no_pm)"
+        return 1
+    fi
+    print_message "SUCCESS" "$(t s3_cli_installed)"
+    return 0
+}
+
+send_s3_document() {
+    local file_path="$1"
+    local file_name=$(basename "$file_path")
+
+    if ! command -v aws &> /dev/null; then
+        print_message "ERROR" "$(t s3_aws_not_found)"
+        return 1
+    fi
+
+    local s3_endpoint_arg=""
+    if [[ -n "$S3_ENDPOINT" ]]; then
+        s3_endpoint_arg="--endpoint-url $S3_ENDPOINT"
+    fi
+
+    local s3_key="${S3_PREFIX:+${S3_PREFIX}/}${file_name}"
+
+    if ! AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+         AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+         AWS_DEFAULT_REGION="$S3_REGION" \
+         aws s3 cp "$file_path" "s3://${S3_BUCKET}/${s3_key}" \
+         $s3_endpoint_arg --quiet 2>&1; then
+        print_message "ERROR" "$(t s3_upload_err)"
+        return 1
+    fi
+
+    print_message "SUCCESS" "$(t s3_upload_ok)"
+    return 0
+}
+
+cleanup_s3_old_backups() {
+    if [[ -z "$S3_BUCKET" || -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" ]]; then
+        return 0
+    fi
+
+    local s3_endpoint_arg=""
+    if [[ -n "$S3_ENDPOINT" ]]; then
+        s3_endpoint_arg="--endpoint-url $S3_ENDPOINT"
+    fi
+
+    local s3_prefix_arg="${S3_PREFIX:+${S3_PREFIX}/}"
+    local cutoff_date=$(date -d "-${S3_RETAIN_DAYS} days" +%Y-%m-%d 2>/dev/null || date -v-${S3_RETAIN_DAYS}d +%Y-%m-%d 2>/dev/null)
+
+    if [[ -z "$cutoff_date" ]]; then
+        return 0
+    fi
+
+    local file_list
+    file_list=$(AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+                AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+                AWS_DEFAULT_REGION="$S3_REGION" \
+                aws s3 ls "s3://${S3_BUCKET}/${s3_prefix_arg}" \
+                $s3_endpoint_arg 2>/dev/null | grep "remnawave_backup_.*\.tar\.gz")
+
+    if [[ -z "$file_list" ]]; then
+        return 0
+    fi
+
+    local deleted_count=0
+    while IFS= read -r line; do
+        local file_date=$(echo "$line" | awk '{print $1}')
+        local file_name=$(echo "$line" | awk '{print $NF}')
+        if [[ "$file_date" < "$cutoff_date" ]]; then
+            if AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+               AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+               AWS_DEFAULT_REGION="$S3_REGION" \
+               aws s3 rm "s3://${S3_BUCKET}/${s3_prefix_arg}${file_name}" \
+               $s3_endpoint_arg --quiet 2>/dev/null; then
+                ((deleted_count++))
+            fi
+        fi
+    done <<< "$file_list"
+
+    if [[ $deleted_count -gt 0 ]]; then
+        print_message "INFO" "$(printf "$(t s3_cleaned)" "$deleted_count")"
+    fi
+}
+
 create_backup() {
     print_message "INFO" "$(t bk_starting)"
     echo ""
@@ -1443,6 +1576,20 @@ METAEOF
                 echo -e "${RED}❌ $(t bk_gd_err)${RESET}"
                 send_telegram_message "❌ $(t bk_gd_err_tg)" "None"
             fi
+        elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
+            if send_s3_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
+                print_message "SUCCESS" "$(t bk_s3_ok)"
+                local tg_success_message="💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"✅ *$(t tg_bk_s3)*${backup_info}${db_mode_info}"$'\n'"📁 *$(t tg_db_dir)*"$'\n'"📏 *$(t tg_size)* ${backup_size}"$'\n'"📅 *$(t tg_date)* ${DATE}"
+                
+                if send_telegram_message "$tg_success_message"; then
+                    print_message "SUCCESS" "$(t bk_s3_notify_ok)"
+                else
+                    print_message "ERROR" "$(t bk_s3_notify_fail)"
+                fi
+            else
+                echo -e "${RED}❌ $(t bk_s3_err)${RESET}"
+                send_telegram_message "❌ $(t bk_s3_err_tg)" "None"
+            fi
         else
             print_message "WARN" "$(t bk_unknown_method) ${BOLD}${UPLOAD_METHOD}${RESET}. $(t bk_not_sent)"
             send_telegram_message "❌ $(t bk_unknown_method) ${BOLD}${UPLOAD_METHOD}${RESET}" "None"
@@ -1454,6 +1601,8 @@ METAEOF
             send_telegram_message "$error_msg" "None"
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             print_message "ERROR" "$(t bk_gd_impossible)"
+        elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
+            print_message "ERROR" "$(t bk_s3_impossible)"
         fi
         exit 1
     fi
@@ -1463,6 +1612,12 @@ METAEOF
     print_message "INFO" "$(printf "$(t bk_retention)" "$RETAIN_BACKUPS_DAYS")"
     find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
     print_message "SUCCESS" "$(t bk_retention_ok)"
+    
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        print_message "INFO" "$(printf "$(t bk_s3_retention)" "$S3_RETAIN_DAYS")"
+        cleanup_s3_old_backups
+        print_message "SUCCESS" "$(t bk_s3_retention_ok)"
+    fi
     
     echo ""
     
@@ -1657,56 +1812,197 @@ restore_backup() {
     fi
     echo ""
 
-    print_message "INFO" "$(t rs_place_file) ${BOLD}${BACKUP_DIR}${RESET}"
+    local S3_STREAM_RESTORE=false
+
+    echo "$(t rs_source_select)"
+    echo " 1. $(t rs_source_local)"
+    echo " 2. $(t rs_source_s3)"
     echo ""
-
-    if ! compgen -G "$BACKUP_DIR/remnawave_backup_*.tar.gz" > /dev/null; then
-        print_message "ERROR" "$(t rs_no_files) ${BOLD}${BACKUP_DIR}${RESET}."
-        read -rp "$(t press_enter_back)"
-        return
-    fi
-
-    readarray -t SORTED_BACKUP_FILES < <(
-        find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -printf "%T@ %p\n" | sort -nr | cut -d' ' -f2-
-    )
-
+    echo " 0. $(t back_to_menu)"
     echo ""
-    echo "$(t rs_select_file)"
-    local i=1
-    for file in "${SORTED_BACKUP_FILES[@]}"; do
-        echo " $i) ${file##*/}"
-        i=$((i+1))
-    done
-    echo ""
-    echo " 0) $(t back_to_menu)"
-    echo ""
+    local source_choice
+    read -rp "${GREEN}[?]${RESET} $(t select_option)" source_choice
 
-    local user_choice selected_index
-    while true; do
-        read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" user_choice
-        [[ "$user_choice" == "0" ]] && return
-        [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "$(t invalid_input)"; continue; }
-        selected_index=$((user_choice - 1))
-        (( selected_index >= 0 && selected_index < ${#SORTED_BACKUP_FILES[@]} )) && break
-        print_message "ERROR" "$(t rs_invalid_num)"
-    done
+    case "$source_choice" in
+        0) return ;;
+        2)
+            local rs_s3_endpoint="$S3_ENDPOINT"
+            local rs_s3_region="${S3_REGION:-us-east-1}"
+            local rs_s3_bucket="$S3_BUCKET"
+            local rs_s3_access="$S3_ACCESS_KEY"
+            local rs_s3_secret="$S3_SECRET_KEY"
+            local rs_s3_prefix="$S3_PREFIX"
 
-    SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
+            if [[ -z "$rs_s3_bucket" || -z "$rs_s3_access" || -z "$rs_s3_secret" || -z "$rs_s3_endpoint" ]]; then
+                print_message "ACTION" "$(t rs_s3_enter_creds)"
+                echo ""
+                [[ -z "$rs_s3_endpoint" ]] && read -rp "   $(t ul_s3_enter_endpoint)" rs_s3_endpoint
+                [[ -z "$rs_s3_region" || "$rs_s3_region" == "us-east-1" ]] && { read -rp "   $(t ul_s3_enter_region)" input_region; rs_s3_region="${input_region:-us-east-1}"; }
+                [[ -z "$rs_s3_bucket" ]] && read -rp "   $(t ul_s3_enter_bucket)" rs_s3_bucket
+                [[ -z "$rs_s3_access" ]] && read -rp "   $(t ul_s3_enter_access)" rs_s3_access
+                [[ -z "$rs_s3_secret" ]] && read -rp "   $(t ul_s3_enter_secret)" rs_s3_secret
+                echo ""
+                echo "   $(t ul_s3_prefix_info1)"
+                echo "   $(t ul_s3_prefix_info2)"
+                read -rp "   $(t ul_s3_enter_prefix)" rs_s3_prefix
+                echo ""
 
-    clear
-    print_message "INFO" "$(t rs_unpacking)"
+                if [[ -z "$rs_s3_bucket" || -z "$rs_s3_access" || -z "$rs_s3_secret" || -z "$rs_s3_endpoint" ]]; then
+                    print_message "ERROR" "$(t ul_s3_fail)"
+                    read -rp "$(t press_enter_back)"
+                    return
+                fi
+            fi
+
+            if ! command -v aws &> /dev/null; then
+                if ! install_aws_cli; then
+                    print_message "ERROR" "$(t s3_aws_not_found)"
+                    read -rp "$(t press_enter_back)"
+                    return
+                fi
+            fi
+
+            print_message "INFO" "$(t rs_s3_listing)"
+
+            local s3_endpoint_arg="--endpoint-url $rs_s3_endpoint"
+            local s3_prefix_arg="${rs_s3_prefix:+${rs_s3_prefix}/}"
+
+            local s3_file_list
+            s3_file_list=$(AWS_ACCESS_KEY_ID="$rs_s3_access" \
+                AWS_SECRET_ACCESS_KEY="$rs_s3_secret" \
+                AWS_DEFAULT_REGION="$rs_s3_region" \
+                aws s3 ls "s3://${rs_s3_bucket}/${s3_prefix_arg}" \
+                $s3_endpoint_arg 2>/dev/null | grep "remnawave_backup_.*\.tar\.gz" | sort -r)
+
+            if [[ -z "$s3_file_list" ]]; then
+                print_message "ERROR" "$(t rs_s3_no_files)"
+                read -rp "$(t press_enter_back)"
+                return
+            fi
+
+            local -a s3_files=()
+            local -a s3_sizes=()
+            while IFS= read -r line; do
+                local fname
+                fname=$(echo "$line" | awk '{print $NF}')
+                local fsize
+                fsize=$(echo "$line" | awk '{print $3}')
+                if [[ -n "$fname" ]]; then
+                    s3_files+=("$fname")
+                    s3_sizes+=("$fsize")
+                fi
+            done <<< "$s3_file_list"
+
+            echo ""
+            echo "$(t rs_s3_select)"
+            local i=1
+            for idx in "${!s3_files[@]}"; do
+                local human_size
+                human_size=$(numfmt --to=iec-i --suffix=B "${s3_sizes[$idx]}" 2>/dev/null || echo "${s3_sizes[$idx]}B")
+                echo " $i) ${s3_files[$idx]} ($human_size)"
+                i=$((i+1))
+            done
+            echo ""
+            echo " 0) $(t back)"
+            echo ""
+
+            local s3_choice s3_index
+            while true; do
+                read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" s3_choice
+                [[ "$s3_choice" == "0" ]] && return
+                [[ "$s3_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "$(t invalid_input)"; continue; }
+                s3_index=$((s3_choice - 1))
+                (( s3_index >= 0 && s3_index < ${#s3_files[@]} )) && break
+                print_message "ERROR" "$(t rs_invalid_num)"
+            done
+
+            local selected_s3_file="${s3_files[$s3_index]}"
+            local s3_full_key="${s3_prefix_arg}${selected_s3_file}"
+
+            S3_STREAM_RESTORE=true
+            S3_RESTORE_KEY="$s3_full_key"
+            S3_RESTORE_FILE="$selected_s3_file"
+            S3_RESTORE_ENDPOINT_ARG="$s3_endpoint_arg"
+            S3_RESTORE_ACCESS="$rs_s3_access"
+            S3_RESTORE_SECRET="$rs_s3_secret"
+            S3_RESTORE_REGION="$rs_s3_region"
+            S3_RESTORE_BUCKET="$rs_s3_bucket"
+            ;;
+        1) ;;
+        *) print_message "ERROR" "$(t invalid_input_select)"; read -rp "$(t press_enter)"; return ;;
+    esac
+
     local temp_restore_dir="$BACKUP_DIR/restore_temp_$$"
     mkdir -p "$temp_restore_dir"
 
-    if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
-        print_message "ERROR" "$(t rs_unpack_err)"
-        rm -rf "$temp_restore_dir"
-        read -rp "$(t press_enter_back)"
-        return
-    fi
+    if [[ "$S3_STREAM_RESTORE" == true ]]; then
+        clear
+        print_message "INFO" "$(t rs_s3_stream) ${BOLD}${S3_RESTORE_FILE}${RESET}..."
 
-    print_message "SUCCESS" "$(t rs_unpacked)"
-    echo ""
+        if ! AWS_ACCESS_KEY_ID="$S3_RESTORE_ACCESS" \
+             AWS_SECRET_ACCESS_KEY="$S3_RESTORE_SECRET" \
+             AWS_DEFAULT_REGION="$S3_RESTORE_REGION" \
+             aws s3 cp "s3://${S3_RESTORE_BUCKET}/${S3_RESTORE_KEY}" - \
+             $S3_RESTORE_ENDPOINT_ARG 2>/dev/null | tar -xzf - -C "$temp_restore_dir"; then
+            print_message "ERROR" "$(t rs_s3_stream_err)"
+            rm -rf "$temp_restore_dir"
+            read -rp "$(t press_enter_back)"
+            return
+        fi
+
+        print_message "SUCCESS" "$(t rs_s3_stream_ok)"
+        echo ""
+    else
+        print_message "INFO" "$(t rs_place_file) ${BOLD}${BACKUP_DIR}${RESET}"
+        echo ""
+
+        if ! compgen -G "$BACKUP_DIR/remnawave_backup_*.tar.gz" > /dev/null; then
+            print_message "ERROR" "$(t rs_no_files) ${BOLD}${BACKUP_DIR}${RESET}."
+            rm -rf "$temp_restore_dir"
+            read -rp "$(t press_enter_back)"
+            return
+        fi
+
+        readarray -t SORTED_BACKUP_FILES < <(
+            find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -printf "%T@ %p\n" | sort -nr | cut -d' ' -f2-
+        )
+
+        echo ""
+        echo "$(t rs_select_file)"
+        local i=1
+        for file in "${SORTED_BACKUP_FILES[@]}"; do
+            echo " $i) ${file##*/}"
+            i=$((i+1))
+        done
+        echo ""
+        echo " 0) $(t back_to_menu)"
+        echo ""
+
+        local user_choice selected_index
+        while true; do
+            read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" user_choice
+            [[ "$user_choice" == "0" ]] && { rm -rf "$temp_restore_dir"; return; }
+            [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "$(t invalid_input)"; continue; }
+            selected_index=$((user_choice - 1))
+            (( selected_index >= 0 && selected_index < ${#SORTED_BACKUP_FILES[@]} )) && break
+            print_message "ERROR" "$(t rs_invalid_num)"
+        done
+
+        SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
+
+        clear
+        print_message "INFO" "$(t rs_unpacking)"
+
+        if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
+            print_message "ERROR" "$(t rs_unpack_err)"
+            rm -rf "$temp_restore_dir"
+            read -rp "$(t press_enter_back)"
+            return
+        fi
+
+        print_message "SUCCESS" "$(t rs_unpacked)"
+        echo ""
+    fi
 
     local BACKUP_DUMP_TYPE="dumpall"
     local BACKUP_META_VERSION=""
@@ -2165,6 +2461,7 @@ configure_upload_method() {
         echo ""
         echo "   1. $(t ul_set_tg)"
         echo "   2. $(t ul_set_gd)"
+        echo "   3. $(t ul_set_s3)"
         echo ""
         echo "   0. $(t back_to_menu)"
         echo ""
@@ -2254,6 +2551,53 @@ configure_upload_method() {
                     print_message "SUCCESS" "$(t ul_tg_set)"
                 fi
                 ;;
+            3)
+                if ! install_aws_cli; then
+                    print_message "WARN" "$(t ul_s3_aws_needed)"
+                    echo ""
+                    read -rp "$(t press_enter)"
+                    continue
+                fi
+                
+                UPLOAD_METHOD="s3"
+                print_message "SUCCESS" "$(t ul_s3_set)"
+                
+                local s3_setup_successful=true
+
+                if [[ -z "$S3_BUCKET" || -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" ]]; then
+                    print_message "ACTION" "$(t ul_s3_enter)"
+                    echo ""
+                    read -rp "   $(t ul_s3_enter_endpoint)" S3_ENDPOINT
+                    read -rp "   $(t ul_s3_enter_region)" S3_REGION
+                    S3_REGION="${S3_REGION:-us-east-1}"
+                    read -rp "   $(t ul_s3_enter_bucket)" S3_BUCKET
+                    read -rp "   $(t ul_s3_enter_access)" S3_ACCESS_KEY
+                    read -rp "   $(t ul_s3_enter_secret)" S3_SECRET_KEY
+                    echo ""
+                    echo "   $(t ul_s3_prefix_info1)"
+                    echo "   $(t ul_s3_prefix_info2)"
+                    read -rp "   $(t ul_s3_enter_prefix)" S3_PREFIX
+                    echo ""
+                    print_message "INFO" "$(t ul_s3_retain_info)"
+                    read -rp "   $(printf "$(t ul_s3_enter_retain)" "$S3_RETAIN_DAYS")" input_s3_retain
+                    S3_RETAIN_DAYS="${input_s3_retain:-$S3_RETAIN_DAYS}"
+                    
+                    if [[ -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" || -z "$S3_BUCKET" ]]; then
+                        print_message "ERROR" "$(t ul_s3_fail)"
+                        print_message "WARN" "$(t ul_s3_not_done)"
+                        UPLOAD_METHOD="telegram"
+                        s3_setup_successful=false
+                    fi
+                fi
+
+                save_config
+
+                if $s3_setup_successful; then
+                    print_message "SUCCESS" "$(t ul_s3_saved)"
+                else
+                    print_message "SUCCESS" "$(t ul_tg_set)"
+                fi
+                ;;
             0) break ;;
             *) print_message "ERROR" "$(t invalid_input_select)" ;;
         esac
@@ -2270,9 +2614,11 @@ configure_settings() {
         echo ""
         echo "   1. $(t st_tg_settings)"
         echo "   2. $(t st_gd_settings)"
-        echo "   3. $(t st_db_settings)"
-        echo "   4. $(t st_path_settings)"
-        echo "   5. $(t st_lang)"
+        echo "   3. $(t st_s3_settings)"
+        echo "   4. $(t st_db_settings)"
+        echo "   5. $(t st_path_settings)"
+        echo "   6. $(t st_retention_settings)"
+        echo "   7. $(t st_lang)"
         echo ""
         echo "   0. $(t back_to_menu)"
         echo ""
@@ -2423,6 +2769,101 @@ configure_settings() {
             3)
                 while true; do
                     clear
+                    echo -e "${GREEN}${BOLD}$(t st_s3_title)${RESET}"
+                    echo ""
+                    print_message "INFO" "$(t st_s3_endpoint) ${BOLD}${S3_ENDPOINT:-$(t not_set)}${RESET}"
+                    print_message "INFO" "$(t st_s3_region) ${BOLD}${S3_REGION:-$(t not_set)}${RESET}"
+                    print_message "INFO" "$(t st_s3_bucket) ${BOLD}${S3_BUCKET:-$(t not_set)}${RESET}"
+                    print_message "INFO" "$(t st_s3_access) ${BOLD}${S3_ACCESS_KEY:+****${S3_ACCESS_KEY: -4}}${RESET}"
+                    print_message "INFO" "$(t st_s3_secret) ${BOLD}${S3_SECRET_KEY:+****}${RESET}"
+                    print_message "INFO" "$(t st_s3_prefix) ${BOLD}${S3_PREFIX:-$(t root_folder)}${RESET}"
+                    echo ""
+                    echo "   1. $(t st_s3_change_endpoint)"
+                    echo "   2. $(t st_s3_change_region)"
+                    echo "   3. $(t st_s3_change_bucket)"
+                    echo "   4. $(t st_s3_change_access)"
+                    echo "   5. $(t st_s3_change_secret)"
+                    echo "   6. $(t st_s3_change_prefix)"
+                    echo "   7. $(t st_s3_test)"
+                    echo ""
+                    echo "   0. $(t back)"
+                    echo ""
+                    read -rp "${GREEN}[?]${RESET} $(t select_option)" s3_choice
+                    echo ""
+
+                    case $s3_choice in
+                        1)
+                            read -rp "   $(t st_s3_enter_endpoint)" NEW_S3_ENDPOINT
+                            S3_ENDPOINT="$NEW_S3_ENDPOINT"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_endpoint_ok)"
+                            ;;
+                        2)
+                            read -rp "   $(t st_s3_enter_region)" NEW_S3_REGION
+                            S3_REGION="${NEW_S3_REGION:-us-east-1}"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_region_ok)"
+                            ;;
+                        3)
+                            read -rp "   $(t st_s3_enter_bucket)" NEW_S3_BUCKET
+                            S3_BUCKET="$NEW_S3_BUCKET"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_bucket_ok)"
+                            ;;
+                        4)
+                            read -rp "   $(t st_s3_enter_access)" NEW_S3_ACCESS_KEY
+                            S3_ACCESS_KEY="$NEW_S3_ACCESS_KEY"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_access_ok)"
+                            ;;
+                        5)
+                            read -rp "   $(t st_s3_enter_secret)" NEW_S3_SECRET_KEY
+                            S3_SECRET_KEY="$NEW_S3_SECRET_KEY"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_secret_ok)"
+                            ;;
+                        6)
+                            echo "   $(t ul_s3_prefix_info1)"
+                            echo "   $(t ul_s3_prefix_info2)"
+                            read -rp "   $(t st_s3_enter_prefix)" NEW_S3_PREFIX
+                            S3_PREFIX="$NEW_S3_PREFIX"
+                            save_config
+                            print_message "SUCCESS" "$(t st_s3_prefix_ok)"
+                            ;;
+                        7)
+                            if [[ -z "$S3_BUCKET" || -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" ]]; then
+                                print_message "ERROR" "$(t st_s3_test_missing)"
+                            else
+                                print_message "INFO" "$(t st_s3_testing)"
+                                if install_aws_cli; then
+                                    local s3_test_endpoint=""
+                                    if [[ -n "$S3_ENDPOINT" ]]; then
+                                        s3_test_endpoint="--endpoint-url $S3_ENDPOINT"
+                                    fi
+                                    local test_prefix="${S3_PREFIX:+${S3_PREFIX}/}"
+                                    if AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+                                       AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+                                       AWS_DEFAULT_REGION="$S3_REGION" \
+                                       aws s3 ls "s3://${S3_BUCKET}/${test_prefix}" \
+                                       $s3_test_endpoint >/dev/null 2>&1; then
+                                        print_message "SUCCESS" "$(t st_s3_test_ok)"
+                                    else
+                                        print_message "ERROR" "$(t st_s3_test_fail)"
+                                    fi
+                                fi
+                            fi
+                            ;;
+                        0) break ;;
+                        *) print_message "ERROR" "$(t invalid_input_select)" ;;
+                    esac
+                    echo ""
+                    read -rp "$(t press_enter)"
+                done
+                ;;
+
+            4)
+                while true; do
+                    clear
                     echo -e "${GREEN}${BOLD}$(t st_db_title)${RESET}"
                     echo ""
                     if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
@@ -2554,7 +2995,7 @@ configure_settings() {
                 done
                 ;;
 
-            4)
+            5)
                 clear
                 echo -e "${GREEN}${BOLD}$(t st_path_title)${RESET}"
                 echo ""
@@ -2623,7 +3064,42 @@ configure_settings() {
                 read -rp "$(t press_enter)"
                 ;;
 
-            5)
+            6)
+                clear
+                echo -e "${GREEN}${BOLD}$(t st_retention_title)${RESET}"
+                echo ""
+                print_message "INFO" "$(t st_retention_local) ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} $(t st_retention_days)"
+                print_message "INFO" "$(t st_retention_s3) ${BOLD}${S3_RETAIN_DAYS}${RESET} $(t st_retention_days)"
+                echo ""
+                echo "   1. $(t st_retention_change_local)"
+                echo "   2. $(t st_retention_change_s3)"
+                echo ""
+                echo "   0. $(t back)"
+                echo ""
+                read -rp "${GREEN}[?]${RESET} $(t select_option)" ret_choice
+                echo ""
+
+                case $ret_choice in
+                    1)
+                        read -rp "   $(printf "$(t st_retention_enter_local)" "$RETAIN_BACKUPS_DAYS")" new_local_ret
+                        RETAIN_BACKUPS_DAYS="${new_local_ret:-$RETAIN_BACKUPS_DAYS}"
+                        save_config
+                        print_message "SUCCESS" "$(t st_retention_local_ok) ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} $(t st_retention_days)"
+                        ;;
+                    2)
+                        read -rp "   $(printf "$(t st_retention_enter_s3)" "$S3_RETAIN_DAYS")" new_s3_ret
+                        S3_RETAIN_DAYS="${new_s3_ret:-$S3_RETAIN_DAYS}"
+                        save_config
+                        print_message "SUCCESS" "$(t st_retention_s3_ok) ${BOLD}${S3_RETAIN_DAYS}${RESET} $(t st_retention_days)"
+                        ;;
+                    0) ;;
+                    *) print_message "ERROR" "$(t invalid_input_select)" ;;
+                esac
+                echo ""
+                read -rp "$(t press_enter)"
+                ;;
+
+            7)
                 clear
                 echo -e "${GREEN}${BOLD}$(t st_lang)${RESET}"
                 echo ""
