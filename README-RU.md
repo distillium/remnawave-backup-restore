@@ -114,3 +114,45 @@ curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawa
 ```
 ## Команды:
 - `rw-backup` — быстрый доступ в меню из любой точки системы
+
+<div align="center">
+
+## 💎 Поддержать проект
+
+<br>
+
+<table>
+  <thead>
+    <tr>
+      <th width="120">Сеть</th>
+      <th width="480">Адрес USDT</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>BSC</b></td>
+      <td><code>0x8b91f0c1ad7d03aa2427c342db81e3aee04b12a5</code></td>
+    </tr>
+    <tr>
+      <td align="center"><b>TRON</b></td>
+      <td><code>TEB6RzsH15qkguYWCCCeHDTKUEVE2qSEH2</code></td>
+    </tr>
+    <tr>
+      <td align="center"><b>TON</b></td>
+      <td><code>UQD2br2gNfuFEfK4uiki78bxFCiPdN7OLYqZ6EHkNtivemQ1</code></td>
+    </tr>
+    <tr>
+      <td align="center"><b>SOL</b></td>
+      <td><code>Hieo9WK2oTcURmkXj1WAccBSRzSDsuLyvs4s5jH7C6kS</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<br>
+
+
+ Спасибо за вашу поддержку! 🙏
+
+<br>
+
+</div>
