@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.0.0"
+VERSION="3.0.1"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -1314,19 +1314,45 @@ install_aws_cli() {
         print_message "ERROR" "$(t s3_cli_root)"
         return 1
     fi
+
+    local installed=false
+
     if command -v apt-get &> /dev/null; then
         apt-get update -qq > /dev/null 2>&1
-        apt-get install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+        if apt-get install -y awscli > /dev/null 2>&1; then
+            installed=true
+        fi
     elif command -v yum &> /dev/null; then
-        yum install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+        if yum install -y awscli > /dev/null 2>&1; then
+            installed=true
+        fi
     elif command -v dnf &> /dev/null; then
-        dnf install -y awscli > /dev/null 2>&1 || { print_message "ERROR" "$(t s3_cli_fail)"; return 1; }
+        if dnf install -y awscli > /dev/null 2>&1; then
+            installed=true
+        fi
+    fi
+
+    if ! $installed && ! command -v aws &> /dev/null; then
+        print_message "INFO" "$(t s3_cli_fallback)"
+        local tmp_dir=$(mktemp -d)
+        if curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$tmp_dir/awscliv2.zip" 2>/dev/null; then
+            if command -v unzip &> /dev/null || apt-get install -y unzip > /dev/null 2>&1 || yum install -y unzip > /dev/null 2>&1; then
+                unzip -q "$tmp_dir/awscliv2.zip" -d "$tmp_dir" > /dev/null 2>&1
+                if "$tmp_dir/aws/install" > /dev/null 2>&1; then
+                    installed=true
+                fi
+            fi
+        fi
+        rm -rf "$tmp_dir"
+    fi
+
+    if command -v aws &> /dev/null; then
+        print_message "SUCCESS" "$(t s3_cli_installed)"
+        return 0
     else
-        print_message "ERROR" "$(t s3_cli_no_pm)"
+        print_message "ERROR" "$(t s3_cli_fail)"
         return 1
     fi
-    print_message "SUCCESS" "$(t s3_cli_installed)"
-    return 0
 }
 
 send_s3_document() {
