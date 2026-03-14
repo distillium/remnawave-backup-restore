@@ -34,6 +34,7 @@ DB_SSL_MODE="prefer"
 DB_POSTGRES_VERSION="17"
 CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
+CURL_PROXY=""
 UPDATE_AVAILABLE=false
 BACKUP_EXCLUDE_PATTERNS="*.log *.tmp .git"
 LANG_CODE=""
@@ -378,7 +379,7 @@ create_bot_backup() {
     fi
     
     print_message "INFO" "$(t cbot_dumping)"
-    if ! docker exec -t "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
+    if ! docker exec "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
         print_message "ERROR" "$(t cbot_dump_err)"
         return 0
     fi
@@ -710,6 +711,7 @@ RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 CRON_TIMES="$CRON_TIMES"
 REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 TG_MESSAGE_THREAD_ID="$TG_MESSAGE_THREAD_ID"
+CURL_PROXY="$CURL_PROXY"
 BOT_BACKUP_ENABLED="$BOT_BACKUP_ENABLED"
 BOT_BACKUP_PATH="$BOT_BACKUP_PATH"
 BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
@@ -739,6 +741,7 @@ load_or_create_config() {
         CRON_TIMES=${CRON_TIMES:-}
         REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         TG_MESSAGE_THREAD_ID=${TG_MESSAGE_THREAD_ID:-}
+        CURL_PROXY=${CURL_PROXY:-}
         SKIP_PANEL_BACKUP=${SKIP_PANEL_BACKUP:-false}
         DB_CONNECTION_TYPE=${DB_CONNECTION_TYPE:-docker}
         DB_HOST=${DB_HOST:-}
@@ -1166,6 +1169,9 @@ send_telegram_message() {
         send_text=$(escape_markdown_v2 "$message")
     fi
 
+    local proxy_args=()
+    [[ -n "$CURL_PROXY" ]] && proxy_args=(-x "$CURL_PROXY")
+
     local data_params=(
         -d chat_id="$CHAT_ID"
         -d text="$send_text"
@@ -1178,14 +1184,14 @@ send_telegram_message() {
     [[ -n "$TG_MESSAGE_THREAD_ID" ]] && data_params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
 
     local response
-    response=$(curl -s -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
+    response=$(curl -s -4 --http1.1 "${proxy_args[@]}" -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
     local body=$(echo "$response" | head -n -1)
     local http_code=$(echo "$response" | tail -n1)
 
     if [[ "$http_code" -eq 200 ]]; then
         return 0
     else
-        response=$(curl -s -X POST "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
+        response=$(curl -s -4 --http1.1 "${proxy_args[@]}" -X POST "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
         http_code=$(echo "$response" | tail -n1)
         if [[ "$http_code" -eq 200 ]]; then
             return 0
@@ -1204,8 +1210,12 @@ send_telegram_document() {
     escaped_caption=$(escape_markdown_v2 "$caption")
 
     if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
+        echo -e "${RED}❌ $(t tg_no_creds)${RESET}"
         return 1
     fi
+
+    local proxy_args=()
+    [[ -n "$CURL_PROXY" ]] && proxy_args=(-x "$CURL_PROXY")
 
     local form_params=(
         -F chat_id="$CHAT_ID"
@@ -1218,25 +1228,72 @@ send_telegram_document() {
         form_params+=(-F message_thread_id="$TG_MESSAGE_THREAD_ID")
     fi
 
-    local api_response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+    local tmp_response
+    tmp_response=$(mktemp)
+
+    local api_response
+    api_response=$(curl -s -4 --http1.1 --connect-timeout 30 --max-time 600 \
+        "${proxy_args[@]}" \
+        -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
         "${form_params[@]}" \
-        -w "%{http_code}" -o /dev/null 2>&1)
+        -w "%{http_code}" -o "$tmp_response" 2>&1)
 
     local curl_status=$?
 
     if [ $curl_status -ne 0 ]; then
-        echo -e "${RED}❌ $(t tg_curl_err) ${BOLD}$curl_status${RESET}. $(t tg_check_net)${RESET}"
+        rm -f "$tmp_response"
+        case $curl_status in
+            6)  echo -e "${RED}❌ $(t tg_err_dns)${RESET}" ;;
+            7)  echo -e "${RED}❌ $(t tg_err_conn)${RESET}" ;;
+            28) echo -e "${RED}❌ $(t tg_err_timeout)${RESET}" ;;
+            35|60) echo -e "${RED}❌ $(t tg_err_ssl)${RESET}" ;;
+            56|92) echo -e "${RED}❌ $(t tg_err_recv)${RESET}" ;;
+            *)  echo -e "${RED}❌ $(t tg_err_unknown) (curl: $curl_status)${RESET}" ;;
+        esac
         return 1
     fi
 
     local http_code="${api_response: -3}"
+    local body
+    body=$(cat "$tmp_response" 2>/dev/null)
+    rm -f "$tmp_response"
 
     if [[ "$http_code" == "200" ]]; then
         return 0
-    else
-        echo -e "${RED}❌ $(t tg_api_err) ${BOLD}$http_code${RESET}. $(t tg_resp_label) ${BOLD}$api_response${RESET}. $(t tg_maybe_big)${RESET}"
-        return 1
     fi
+
+    # If MarkdownV2 failed, retry without formatting
+    if [[ "$http_code" == "400" && "$parse_mode" == "MarkdownV2" ]]; then
+        echo -e "${YELLOW}[WARN] $(t tg_md_retry)${RESET}"
+        form_params=(
+            -F chat_id="$CHAT_ID"
+            -F document=@"$file_path"
+            -F caption="$caption"
+        )
+        [[ -n "$TG_MESSAGE_THREAD_ID" ]] && form_params+=(-F message_thread_id="$TG_MESSAGE_THREAD_ID")
+
+        tmp_response=$(mktemp)
+        api_response=$(curl -s -4 --http1.1 --connect-timeout 30 --max-time 600 \
+            "${proxy_args[@]}" \
+            -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+            "${form_params[@]}" \
+            -w "%{http_code}" -o "$tmp_response" 2>&1)
+
+        http_code="${api_response: -3}"
+        body=$(cat "$tmp_response" 2>/dev/null)
+        rm -f "$tmp_response"
+
+        if [[ "$http_code" == "200" ]]; then
+            return 0
+        fi
+    fi
+
+    local tg_desc=""
+    tg_desc=$(echo "$body" | grep -o '"description":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    echo -e "${RED}❌ $(t tg_err_api) ${BOLD}$http_code${RESET}"
+    [[ -n "$tg_desc" ]] && echo -e "${RED}   $(t tg_err_detail) ${tg_desc}${RESET}"
+    return 1
 }
 
 get_google_access_token() {
@@ -1586,7 +1643,7 @@ METAEOF
             elif send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text"; then
                 print_message "SUCCESS" "$(t bk_tg_ok)"
             else
-                echo -e "${RED}❌ $(t bk_tg_err)${RESET}"
+                print_message "INFO" "$(t bk_saved_local) ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}"
             fi
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
