@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.0.1"
+VERSION="3.0.2"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -378,7 +378,7 @@ create_bot_backup() {
     fi
     
     print_message "INFO" "$(t cbot_dumping)"
-    if ! docker exec -t "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
+    if ! docker exec "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
         print_message "ERROR" "$(t cbot_dump_err)"
         return 0
     fi
@@ -1062,7 +1062,7 @@ create_panel_db_dump() {
             fi
             
             local docker_error_log=$(mktemp)
-            if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"; then
+            if ! docker exec "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"; then
                 LAST_DB_ERROR=$(cat "$docker_error_log" 2>/dev/null | head -5 | tr '\n' ' ')
                 rm -f "$docker_error_log"
                 return 1
@@ -1218,7 +1218,8 @@ send_telegram_document() {
         form_params+=(-F message_thread_id="$TG_MESSAGE_THREAD_ID")
     fi
 
-    local api_response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+    local api_response
+    api_response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
         "${form_params[@]}" \
         -w "%{http_code}" -o /dev/null 2>&1)
 
@@ -1522,12 +1523,12 @@ create_backup() {
     fi
     
     cat > "$BACKUP_DIR/backup_meta.info" <<METAEOF
-DUMP_TYPE=$DUMP_TYPE
-DB_CONNECTION_TYPE=$DB_CONNECTION_TYPE
-DB_NAME=$DB_NAME
-BACKUP_VERSION=$VERSION
-PANEL_VERSION=$REMNAWAVE_VERSION
-TIMESTAMP=$TIMESTAMP
+DUMP_TYPE="$DUMP_TYPE"
+DB_CONNECTION_TYPE="$DB_CONNECTION_TYPE"
+DB_NAME="$DB_NAME"
+BACKUP_VERSION="$VERSION"
+PANEL_VERSION="$REMNAWAVE_VERSION"
+TIMESTAMP="$TIMESTAMP"
 METAEOF
     BACKUP_ITEMS+=("backup_meta.info")
     
