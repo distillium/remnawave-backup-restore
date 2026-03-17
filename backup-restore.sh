@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.0.2"
+VERSION="3.1.0"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -35,6 +35,7 @@ DB_POSTGRES_VERSION="17"
 CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
 UPDATE_AVAILABLE=false
+AUTO_UPDATE="false"
 BACKUP_EXCLUDE_PATTERNS="*.log *.tmp .git"
 LANG_CODE=""
 TRANSLATIONS_DIR="$INSTALL_DIR/translations"
@@ -723,6 +724,7 @@ DB_PASSWORD="$DB_PASSWORD"
 DB_SSL_MODE="$DB_SSL_MODE"
 DB_POSTGRES_VERSION="$DB_POSTGRES_VERSION"
 LANG_CODE="$LANG_CODE"
+AUTO_UPDATE="$AUTO_UPDATE"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "$(t chmod_error) ${BOLD}${CONFIG_FILE}${RESET}. $(t check_permissions)"; exit 1; }
     print_message "SUCCESS" "$(t config_saved)"
@@ -756,6 +758,7 @@ load_or_create_config() {
         S3_RETAIN_DAYS=${S3_RETAIN_DAYS:-30}
         RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         LANG_CODE=${LANG_CODE:-}
+        AUTO_UPDATE=${AUTO_UPDATE:-false}
         
         if [[ -z "$LANG_CODE" || ! -f "$TRANSLATIONS_DIR/$LANG_CODE.sh" ]]; then
             download_translations
@@ -1657,8 +1660,40 @@ METAEOF
             REMOTE_VERSION_LATEST=$(curl -fsSL "$SCRIPT_REPO_URL" 2>/dev/null | grep -m 1 "^VERSION=" | cut -d'"' -f2)
             
             if [[ -n "$REMOTE_VERSION_LATEST" ]]; then
-                local update_msg="⚠️ *$(t tg_update_avail)*"$'\n'"🔄 *$(t tg_cur_ver)* ${CURRENT_VERSION}"$'\n'"🆕 *$(t tg_new_ver)* ${REMOTE_VERSION_LATEST}"$'\n\n'"📥 $(t tg_update_menu)"
-                send_telegram_message "$update_msg" >/dev/null 2>&1
+                if [[ "$AUTO_UPDATE" == "true" ]]; then
+                    local TEMP_SCRIPT_PATH="${INSTALL_DIR}/backup-restore.sh.tmp"
+                    if curl -fsSL "$SCRIPT_REPO_URL" -o "$TEMP_SCRIPT_PATH" 2>/dev/null; then
+                        if [[ -s "$TEMP_SCRIPT_PATH" ]] && head -n 1 "$TEMP_SCRIPT_PATH" | grep -q -e '^#!.*bash'; then
+                            find "$(dirname "$SCRIPT_PATH")" -maxdepth 1 -name "${SCRIPT_NAME}.bak.*" -type f -delete
+                            cp "$SCRIPT_PATH" "${SCRIPT_PATH}.bak.$(date +%s)" 2>/dev/null
+                            mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH" 2>/dev/null
+                            chmod +x "$SCRIPT_PATH" 2>/dev/null
+                            
+                            local base_url="${SCRIPT_REPO_URL%/*}"
+                            mkdir -p "$TRANSLATIONS_DIR"
+                            for lang_file in ru.sh en.sh; do
+                                curl -fsSL "$base_url/translations/$lang_file" -o "$TRANSLATIONS_DIR/$lang_file" 2>/dev/null
+                            done
+                            
+                            local auto_update_msg="✅ *$(t tg_auto_updated)* ${CURRENT_VERSION} *$(t tg_auto_updated_to)* ${REMOTE_VERSION_LATEST}"
+                            local release_url="https://github.com/distillium/remnawave-backup-restore/releases/tag/${REMOTE_VERSION_LATEST}"
+                            local keyboard="{\"inline_keyboard\":[[{\"text\":\"$(t tg_auto_update_changelog)\",\"url\":\"${release_url}\"}]]}"
+
+                            curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                                -d "chat_id=${CHAT_ID}" \
+                                -d "text=${auto_update_msg}" \
+                                -d "parse_mode=Markdown" \
+                                -d "reply_markup=${keyboard}" \
+                                ${TG_MESSAGE_THREAD_ID:+-d "message_thread_id=${TG_MESSAGE_THREAD_ID}"} \
+                                >/dev/null 2>&1
+                        else
+                            rm -f "$TEMP_SCRIPT_PATH"
+                        fi
+                    fi
+                else
+                    local update_msg="⚠️ *$(t tg_update_avail)*"$'\n'"🔄 *$(t tg_cur_ver)* ${CURRENT_VERSION}"$'\n'"🆕 *$(t tg_new_ver)* ${REMOTE_VERSION_LATEST}"$'\n\n'"📥 $(t tg_update_menu)"
+                    send_telegram_message "$update_msg" >/dev/null 2>&1
+                fi
             fi
         fi
     } &
@@ -2646,6 +2681,7 @@ configure_settings() {
         echo "   5. $(t st_path_settings)"
         echo "   6. $(t st_retention_settings)"
         echo "   7. $(t st_lang)"
+        echo "   8. $(t st_auto_update)"
         echo ""
         echo "   0. $(t back_to_menu)"
         echo ""
@@ -3135,6 +3171,41 @@ configure_settings() {
                 select_language_interactive
                 save_config
                 print_message "SUCCESS" "$(t st_lang_changed) ${BOLD}${LANG_CODE}${RESET}"
+                echo ""
+                read -rp "$(t press_enter)"
+                ;;
+
+            8)
+                clear
+                echo -e "${GREEN}${BOLD}$(t st_auto_update)${RESET}"
+                echo ""
+                if [[ "$AUTO_UPDATE" == "true" ]]; then
+                    print_message "INFO" "$(t st_auto_update_status) ${BOLD}${GREEN}$(t st_auto_update_on)${RESET}"
+                else
+                    print_message "INFO" "$(t st_auto_update_status) ${BOLD}${RED}$(t st_auto_update_off)${RESET}"
+                fi
+                echo ""
+                echo "   1. $(t st_auto_update_enable)"
+                echo "   2. $(t st_auto_update_disable)"
+                echo ""
+                echo "   0. $(t back)"
+                echo ""
+                read -rp "${GREEN}[?]${RESET} $(t select_option)" auto_upd_choice
+                echo ""
+                case $auto_upd_choice in
+                    1)
+                        AUTO_UPDATE="true"
+                        save_config
+                        print_message "SUCCESS" "$(t st_auto_update_enabled)"
+                        ;;
+                    2)
+                        AUTO_UPDATE="false"
+                        save_config
+                        print_message "SUCCESS" "$(t st_auto_update_disabled)"
+                        ;;
+                    0) ;;
+                    *) print_message "ERROR" "$(t invalid_input_select)" ;;
+                esac
                 echo ""
                 read -rp "$(t press_enter)"
                 ;;
