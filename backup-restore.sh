@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.1.0"
+VERSION="3.2.0"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -34,6 +34,7 @@ DB_SSL_MODE="prefer"
 DB_POSTGRES_VERSION="17"
 CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
+TG_PROXY=""
 UPDATE_AVAILABLE=false
 AUTO_UPDATE="false"
 BACKUP_EXCLUDE_PATTERNS="*.log *.tmp .git"
@@ -711,6 +712,7 @@ RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 CRON_TIMES="$CRON_TIMES"
 REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 TG_MESSAGE_THREAD_ID="$TG_MESSAGE_THREAD_ID"
+TG_PROXY="$TG_PROXY"
 BOT_BACKUP_ENABLED="$BOT_BACKUP_ENABLED"
 BOT_BACKUP_PATH="$BOT_BACKUP_PATH"
 BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
@@ -741,6 +743,7 @@ load_or_create_config() {
         CRON_TIMES=${CRON_TIMES:-}
         REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         TG_MESSAGE_THREAD_ID=${TG_MESSAGE_THREAD_ID:-}
+        TG_PROXY=${TG_PROXY:-}
         SKIP_PANEL_BACKUP=${SKIP_PANEL_BACKUP:-false}
         DB_CONNECTION_TYPE=${DB_CONNECTION_TYPE:-docker}
         DB_HOST=${DB_HOST:-}
@@ -1181,14 +1184,14 @@ send_telegram_message() {
     [[ -n "$TG_MESSAGE_THREAD_ID" ]] && data_params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
 
     local response
-    response=$(curl -s -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
+    response=$(curl -s -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "$url" "${data_params[@]}" -w "\n%{http_code}")
     local body=$(echo "$response" | head -n -1)
     local http_code=$(echo "$response" | tail -n1)
 
     if [[ "$http_code" -eq 200 ]]; then
         return 0
     else
-        response=$(curl -s -X POST "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
+        response=$(curl -s -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
         http_code=$(echo "$response" | tail -n1)
         if [[ "$http_code" -eq 200 ]]; then
             return 0
@@ -1222,7 +1225,7 @@ send_telegram_document() {
     fi
 
     local api_response
-    api_response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+    api_response=$(curl -s -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
         "${form_params[@]}" \
         -w "%{http_code}" -o /dev/null 2>&1)
 
@@ -1679,7 +1682,7 @@ METAEOF
                             local release_url="https://github.com/distillium/remnawave-backup-restore/releases/tag/${REMOTE_VERSION_LATEST}"
                             local keyboard="{\"inline_keyboard\":[[{\"text\":\"$(t tg_auto_update_changelog)\",\"url\":\"${release_url}\"}]]}"
 
-                            curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                            curl -s -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
                                 -d "chat_id=${CHAT_ID}" \
                                 -d "text=${auto_update_msg}" \
                                 -d "parse_mode=Markdown" \
@@ -2697,10 +2700,13 @@ configure_settings() {
                     print_message "INFO" "$(t st_tg_token) ${BOLD}${BOT_TOKEN}${RESET}"
                     print_message "INFO" "$(t st_tg_chatid) ${BOLD}${CHAT_ID}${RESET}"
                     print_message "INFO" "$(t st_tg_thread) ${BOLD}${TG_MESSAGE_THREAD_ID:-$(t not_set)}${RESET}"
+                    print_message "INFO" "$(t st_tg_proxy) ${BOLD}${TG_PROXY:-$(t not_set)}${RESET}"
+                    echo ""
                     echo ""
                     echo "   1. $(t st_tg_change_token)"
                     echo "   2. $(t st_tg_change_id)"
                     echo "   3. $(t st_tg_change_thread)"
+                    echo "   4. $(t st_tg_change_proxy)"
                     echo ""
                     echo "   0. $(t back)"
                     echo ""
@@ -2730,6 +2736,19 @@ configure_settings() {
                             TG_MESSAGE_THREAD_ID="$NEW_TG_MESSAGE_THREAD_ID"
                             save_config
                             print_message "SUCCESS" "$(t st_tg_thread_ok)"
+                            ;;
+                        4)
+                            print_message "INFO" "$(t st_tg_proxy_info)"
+                            print_message "INFO" "$(t st_tg_proxy_examples)"
+                            echo ""
+                            read -rp "   $(t st_tg_enter_proxy)" NEW_TG_PROXY
+                            TG_PROXY="$NEW_TG_PROXY"
+                            save_config
+                            if [[ -n "$TG_PROXY" ]]; then
+                                print_message "SUCCESS" "$(t st_tg_proxy_ok)"
+                            else
+                                print_message "SUCCESS" "$(t st_tg_proxy_cleared)"
+                            fi
                             ;;
                         0) break ;;
                         *) print_message "ERROR" "$(t invalid_input_select)" ;;
