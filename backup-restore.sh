@@ -36,6 +36,7 @@ CRON_TIMES=""
 TG_MESSAGE_THREAD_ID=""
 UPDATE_AVAILABLE=false
 AUTO_UPDATE="false"
+UPDATE_NOTIFICATION="true"
 BACKUP_EXCLUDE_PATTERNS="*.log *.tmp .git"
 LANG_CODE=""
 TRANSLATIONS_DIR="$INSTALL_DIR/translations"
@@ -725,6 +726,7 @@ DB_SSL_MODE="$DB_SSL_MODE"
 DB_POSTGRES_VERSION="$DB_POSTGRES_VERSION"
 LANG_CODE="$LANG_CODE"
 AUTO_UPDATE="$AUTO_UPDATE"
+UPDATE_NOTIFICATION="$UPDATE_NOTIFICATION"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "$(t chmod_error) ${BOLD}${CONFIG_FILE}${RESET}. $(t check_permissions)"; exit 1; }
     print_message "SUCCESS" "$(t config_saved)"
@@ -759,6 +761,7 @@ load_or_create_config() {
         RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         LANG_CODE=${LANG_CODE:-}
         AUTO_UPDATE=${AUTO_UPDATE:-false}
+        UPDATE_NOTIFICATION=${UPDATE_NOTIFICATION:-true}
         
         if [[ -z "$LANG_CODE" || ! -f "$TRANSLATIONS_DIR/$LANG_CODE.sh" ]]; then
             download_translations
@@ -1690,7 +1693,7 @@ METAEOF
                             rm -f "$TEMP_SCRIPT_PATH"
                         fi
                     fi
-                else
+                elif [[ "$UPDATE_NOTIFICATION" == "true" ]]; then
                     local update_msg="⚠️ *$(t tg_update_avail)*"$'\n'"🔄 *$(t tg_cur_ver)* ${CURRENT_VERSION}"$'\n'"🆕 *$(t tg_new_ver)* ${REMOTE_VERSION_LATEST}"$'\n\n'"📥 $(t tg_update_menu)"
                     send_telegram_message "$update_msg" >/dev/null 2>&1
                 fi
@@ -3184,9 +3187,16 @@ configure_settings() {
                 else
                     print_message "INFO" "$(t st_auto_update_status) ${BOLD}${RED}$(t st_auto_update_off)${RESET}"
                 fi
+                if [[ "$UPDATE_NOTIFICATION" == "true" ]]; then
+                    print_message "INFO" "$(t st_update_notify_status) ${BOLD}${GREEN}$(t st_auto_update_on)${RESET}"
+                else
+                    print_message "INFO" "$(t st_update_notify_status) ${BOLD}${RED}$(t st_auto_update_off)${RESET}"
+                fi
                 echo ""
                 echo "   1. $(t st_auto_update_enable)"
                 echo "   2. $(t st_auto_update_disable)"
+                echo "   3. $(t st_update_notify_enable)"
+                echo "   4. $(t st_update_notify_disable)"
                 echo ""
                 echo "   0. $(t back)"
                 echo ""
@@ -3202,6 +3212,16 @@ configure_settings() {
                         AUTO_UPDATE="false"
                         save_config
                         print_message "SUCCESS" "$(t st_auto_update_disabled)"
+                        ;;
+                    3)
+                        UPDATE_NOTIFICATION="true"
+                        save_config
+                        print_message "SUCCESS" "$(t st_update_notify_enabled)"
+                        ;;
+                    4)
+                        UPDATE_NOTIFICATION="false"
+                        save_config
+                        print_message "SUCCESS" "$(t st_update_notify_disabled)"
                         ;;
                     0) ;;
                     *) print_message "ERROR" "$(t invalid_input_select)" ;;
