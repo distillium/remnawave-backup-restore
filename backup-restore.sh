@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.2.0"
+VERSION="3.2.1"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
