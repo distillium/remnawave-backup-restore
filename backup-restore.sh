@@ -1365,19 +1365,20 @@ install_aws_cli() {
 send_s3_document() {
     local file_path="$1"
     local file_name=$(basename "$file_path")
-
     if ! command -v aws &> /dev/null; then
         print_message "ERROR" "$(t s3_aws_not_found)"
         return 1
     fi
-
     local s3_endpoint_arg=""
     if [[ -n "$S3_ENDPOINT" ]]; then
         s3_endpoint_arg="--endpoint-url $S3_ENDPOINT"
     fi
-
     local s3_key="${S3_PREFIX:+${S3_PREFIX}/}${file_name}"
-
+    AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+    AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+    AWS_DEFAULT_REGION="$S3_REGION" \
+    aws s3 ls "s3://${S3_BUCKET}/" \
+    $s3_endpoint_arg >/dev/null 2>&1 || true
     if ! AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
          AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
          AWS_DEFAULT_REGION="$S3_REGION" \
@@ -1386,7 +1387,6 @@ send_s3_document() {
         print_message "ERROR" "$(t s3_upload_err)"
         return 1
     fi
-
     print_message "SUCCESS" "$(t s3_upload_ok)"
     return 0
 }
