@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="3.2.1"
+VERSION="1.1.1"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -12,7 +12,7 @@ RETAIN_BACKUPS_DAYS=7
 S3_RETAIN_DAYS=30
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR=""
-SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
+SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/test/backup-restore.sh"
 SCRIPT_RUN_PATH="$(realpath "$0")"
 GD_CLIENT_ID=""
 GD_CLIENT_SECRET=""
@@ -1379,12 +1379,13 @@ send_s3_document() {
     AWS_DEFAULT_REGION="$S3_REGION" \
     aws s3 ls "s3://${S3_BUCKET}/" \
     $s3_endpoint_arg >/dev/null 2>&1 || true
-    if ! AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+    local s3_error_output
+    if ! s3_error_output=$(AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
          AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
          AWS_DEFAULT_REGION="$S3_REGION" \
          aws s3 cp "$file_path" "s3://${S3_BUCKET}/${s3_key}" \
-         $s3_endpoint_arg --quiet 2>&1; then
-        print_message "ERROR" "$(t s3_upload_err)"
+         $s3_endpoint_arg --quiet 2>&1); then
+        print_message "ERROR" "$(t s3_upload_err): $s3_error_output"
         return 1
     fi
     print_message "SUCCESS" "$(t s3_upload_ok)"
