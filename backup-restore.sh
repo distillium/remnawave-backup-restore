@@ -1132,7 +1132,7 @@ restore_panel_db_dump() {
     
     case "$DB_CONNECTION_TYPE" in
         docker)
-            if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
+            if ! docker exec -i remnawave-db psql -q -U postgres -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
                 return 1
             fi
             ;;
@@ -2193,9 +2193,13 @@ restore_backup() {
         echo ""
         if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
             check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
-            print_message "INFO" "$(t rs_enter_dbname)"
-            read -rp "$(t input_prompt)" restore_db_name
-            restore_db_name="${restore_db_name:-postgres}"
+            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                restore_db_name="postgres"
+            else
+                print_message "INFO" "$(t rs_enter_dbname)"
+                read -rp "$(t input_prompt)" restore_db_name
+                restore_db_name="${restore_db_name:-postgres}"
+            fi
 
             if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
                 if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
