@@ -1077,12 +1077,22 @@ create_panel_db_dump() {
             fi
             
             local docker_error_log=$(mktemp)
-            if ! docker exec "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"; then
+            docker exec "remnawave-db" pg_dump -c -U "$DB_USER" -d "$DB_NAME" 2>"$docker_error_log" | gzip -9 > "$dump_file"
+            local pg_dump_exit_code=${PIPESTATUS[0]}
+            
+            if [[ $pg_dump_exit_code -ne 0 ]]; then
                 LAST_DB_ERROR=$(cat "$docker_error_log" 2>/dev/null | head -5 | tr '\n' ' ')
                 rm -f "$docker_error_log"
                 return 1
             fi
             rm -f "$docker_error_log"
+            
+            local dump_size=$(stat -c%s "$dump_file" 2>/dev/null || stat -f%z "$dump_file" 2>/dev/null || echo "0")
+            if [[ "$dump_size" -lt 100 ]]; then
+                LAST_DB_ERROR="$(printf "$(t db_dump_small)" "$dump_size")"
+                print_message "ERROR" "$LAST_DB_ERROR"
+                return 1
+            fi
             ;;
         external)
             if [[ -z "$DB_HOST" ]]; then
@@ -1530,12 +1540,7 @@ create_backup() {
         exit 1
     fi
     
-    local DUMP_TYPE
-    if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
-        DUMP_TYPE="dumpall"
-    else
-        DUMP_TYPE="dump"
-    fi
+    local DUMP_TYPE="dump"
     
     cat > "$BACKUP_DIR/backup_meta.info" <<METAEOF
 DUMP_TYPE="$DUMP_TYPE"
