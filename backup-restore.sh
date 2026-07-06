@@ -399,7 +399,11 @@ create_bot_backup() {
             exclude_args+="--exclude=$pattern "
         done
         
-        if eval "tar -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'"; then
+        local tar_rc=0
+        eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'" || tar_rc=$?
+        # tar exit code 1 = «file changed as we read it» (напр. активный лог):
+        # архив валиден, не фатально. Прерываемся только на code >= 2.
+        if [[ $tar_rc -le 1 ]]; then
             print_message "SUCCESS" "$(t cbot_archived)"
         else
             print_message "ERROR" "$(t cbot_arch_err)"
@@ -1503,11 +1507,14 @@ create_backup() {
                 exclude_args+="--exclude=$pattern "
             done
             
-            if eval "tar -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'"; then
+            local tar_rc=0
+            eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'" || tar_rc=$?
+            # tar exit code 1 = «file changed as we read it»: архив валиден, не фатально.
+            if [[ $tar_rc -le 1 ]]; then
                 print_message "SUCCESS" "$(t bk_arch_ok)"
                 BACKUP_ITEMS=("$BACKUP_FILE_DB" "$REMNAWAVE_DIR_ARCHIVE")
             else
-                STATUS=$?
+                STATUS=$tar_rc
                 echo -e "${RED}❌ $(t bk_arch_err) ${BOLD}$STATUS${RESET}.${RESET}"
                 local error_msg="❌ $(t bk_arch_err) ${BOLD}${STATUS}${RESET}"
                 if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
