@@ -3,8 +3,9 @@
 set -e
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
+export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="3.2.12 (dev)"
+VERSION="4.0.0 (dev)"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -218,6 +219,7 @@ configure_bot_backup() {
                 echo " 2. $(t bot_jesus_priv)"
                 echo " 3. $(t bot_machka)"
                 echo " 4. $(t bot_snoups)"
+                echo " 5. $(t bot_minishop)"
                 echo " 0. $(t back)"
                 echo ""
                 
@@ -228,6 +230,7 @@ configure_bot_backup() {
                     2) BOT_BACKUP_SELECTED="Приватный бот от Иисуса"; bot_folder="rwp-shop" ;;
                     3) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
                     4) BOT_BACKUP_SELECTED="Бот от Snoups"; bot_folder="remnashop" ;;
+                    5) BOT_BACKUP_SELECTED="Бот Minishop"; bot_folder="remnawave-minishop" ;;
                     0) continue ;;
                     *) print_message "ERROR" "$(t invalid_input)"; sleep 1; continue ;;
                 esac
@@ -332,6 +335,9 @@ get_bot_params() {
         "Бот от Snoups")
             echo "remnashop-db|remnashop-db-data|remnashop|remnashop-db"
             ;;
+        "Бот Minishop")
+            echo "remnawave-minishop-postgres|remnawave-minishop-db-data|remnawave-minishop|postgres"
+            ;;
         *)
             echo "|||"
             ;;
@@ -396,7 +402,9 @@ create_bot_backup() {
             exclude_args+="--exclude=$pattern "
         done
         
-        if eval "tar -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'"; then
+        eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'" || true
+        local bot_tar_exit=${PIPESTATUS[0]}
+        if [[ $bot_tar_exit -lt 2 ]]; then
             print_message "SUCCESS" "$(t cbot_archived)"
         else
             print_message "ERROR" "$(t cbot_arch_err)"
@@ -435,6 +443,32 @@ restore_bot_backup() {
         print_message "INFO" "$(t rbot_cancelled)"
         return 1
     fi
+
+    local bot_restore_scope="all"
+    if [[ -n "$BOT_DUMP_FILE" && -n "$BOT_DIR_ARCHIVE" ]]; then
+        echo ""
+        echo " 1. $(t rs_scope_all)"
+        echo " 2. $(t rs_scope_db)"
+        echo " 3. $(t rs_scope_files)"
+        echo " 0. $(t back)"
+        echo ""
+        local bot_scope_choice
+        read -rp "${GREEN}[?]${RESET} $(t select_option)" bot_scope_choice
+        echo ""
+        case "$bot_scope_choice" in
+            1) bot_restore_scope="all" ;;
+            2) bot_restore_scope="db" ;;
+            3) bot_restore_scope="files" ;;
+            0) print_message "INFO" "$(t rbot_cancelled)"; return 1 ;;
+            *) print_message "ERROR" "$(t invalid_input_select)"; return 1 ;;
+        esac
+    elif [[ -n "$BOT_DUMP_FILE" ]]; then
+        bot_restore_scope="db"
+        print_message "WARN" "$(t rs_scope_only_db_found)"
+    else
+        bot_restore_scope="files"
+        print_message "WARN" "$(t rs_scope_only_files_found)"
+    fi
     
     echo ""
     print_message "WARN" "${YELLOW}$(t rbot_warn_stop)${RESET}"
@@ -453,6 +487,7 @@ restore_bot_backup() {
     echo " 2. $(t bot_jesus_priv)"
     echo " 3. $(t bot_machka)"
     echo " 4. $(t bot_snoups)"
+    echo " 5. $(t bot_minishop)"
     echo ""
     
     local bot_choice
@@ -464,6 +499,7 @@ restore_bot_backup() {
             2) selected_bot_name="Приватный бот от Иисуса"; break ;;
             3) selected_bot_name="Бот от Мачки"; break ;;
             4) selected_bot_name="Бот от Snoups"; break ;;
+            5) selected_bot_name="Бот Minishop"; break ;;
             *) print_message "ERROR" "$(t invalid_input)" ;;
         esac
     done
@@ -526,19 +562,28 @@ restore_bot_backup() {
 
     local bot_params=$(get_bot_params "$selected_bot_name")
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
-    
-    echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_db_user)")" restore_bot_db_user
-    restore_bot_db_user="${restore_bot_db_user:-postgres}"
-    echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_db_name)")" restore_bot_db_name
-    restore_bot_db_name="${restore_bot_db_name:-postgres}"
+
+    if [[ "$bot_restore_scope" != "files" ]]; then
+        echo ""
+        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_db_user)")" restore_bot_db_user
+        restore_bot_db_user="${restore_bot_db_user:-postgres}"
+        echo ""
+        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_db_name)")" restore_bot_db_name
+        restore_bot_db_name="${restore_bot_db_name:-postgres}"
+    fi
     echo ""
     print_message "INFO" "$(t rbot_starting)"
-    
+
+    if [[ "$bot_restore_scope" == "db" ]]; then
+        if ! (cd "$restore_path" 2>/dev/null && { [[ -f docker-compose.yml ]] || [[ -f docker-compose.yaml ]] || [[ -f compose.yml ]] || [[ -f compose.yaml ]]; }); then
+            print_message "ERROR" "$(t rs_files_required_first)"
+            return 1
+        fi
+    fi
+
     if [[ -d "$restore_path" ]]; then
         print_message "INFO" "$(t rbot_exists_stop)"
-    
+
         if cd "$restore_path" 2>/dev/null && ([[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.yaml" ]] || [[ -f "compose.yml" ]] || [[ -f "compose.yaml" ]]); then
             print_message "INFO" "$(t rbot_stopping)"
             docker compose down 2>/dev/null || print_message "WARN" "$(t rbot_stop_fail)"
@@ -546,60 +591,77 @@ restore_bot_backup() {
             print_message "INFO" "$(t rbot_no_compose)"
         fi
     fi
-        
+
     cd /
-        
-    print_message "INFO" "$(t rbot_rm_old)"
-    if [[ -d "$restore_path" ]]; then
-        if ! rm -rf "$restore_path"; then
-            print_message "ERROR" "$(t rbot_rm_fail) ${BOLD}${restore_path}${RESET}."
+
+    if [[ "$bot_restore_scope" != "db" ]]; then
+        print_message "INFO" "$(t rbot_rm_old)"
+        if [[ -d "$restore_path" ]]; then
+            if ! rm -rf "$restore_path"; then
+                print_message "ERROR" "$(t rbot_rm_fail) ${BOLD}${restore_path}${RESET}."
+                return 1
+            fi
+            print_message "SUCCESS" "$(t rbot_rm_done)"
+        else
+            print_message "INFO" "$(t rbot_clean_install)"
+        fi
+
+        print_message "INFO" "$(t rbot_mkdir)"
+        if ! mkdir -p "$restore_path"; then
+            print_message "ERROR" "$(t rbot_mkdir_fail) ${BOLD}${restore_path}${RESET}."
             return 1
         fi
-        print_message "SUCCESS" "$(t rbot_rm_done)"
-    else
-        print_message "INFO" "$(t rbot_clean_install)"
-    fi
-    
-    print_message "INFO" "$(t rbot_mkdir)"
-    if ! mkdir -p "$restore_path"; then
-        print_message "ERROR" "$(t rbot_mkdir_fail) ${BOLD}${restore_path}${RESET}."
-        return 1
-    fi
-    print_message "SUCCESS" "$(t rbot_mkdir_done)"
-    echo ""
-    
-    if [[ -n "$BOT_DIR_ARCHIVE" ]]; then
-        print_message "INFO" "$(t rbot_unpack_dir)"
-        local temp_extract_dir="$BACKUP_DIR/bot_extract_temp_$$"
-        mkdir -p "$temp_extract_dir"
-        
-        if tar -xzf "$BOT_DIR_ARCHIVE" -C "$temp_extract_dir"; then
-            local extracted_dir=$(find "$temp_extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+        print_message "SUCCESS" "$(t rbot_mkdir_done)"
+        echo ""
 
-            if [[ -n "$extracted_dir" && -d "$extracted_dir" ]]; then
-                if cp -rf "$extracted_dir"/. "$restore_path/" 2>/dev/null; then
-                    print_message "SUCCESS" "$(t rbot_files_ok) $(basename "$extracted_dir"))."
+        if [[ -n "$BOT_DIR_ARCHIVE" ]]; then
+            print_message "INFO" "$(t rbot_unpack_dir)"
+            local temp_extract_dir="$BACKUP_DIR/bot_extract_temp_$$"
+            mkdir -p "$temp_extract_dir"
+
+            if tar -xzf "$BOT_DIR_ARCHIVE" -C "$temp_extract_dir"; then
+                local extracted_dir=$(find "$temp_extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+                if [[ -n "$extracted_dir" && -d "$extracted_dir" ]]; then
+                    if cp -rf "$extracted_dir"/. "$restore_path/" 2>/dev/null; then
+                        print_message "SUCCESS" "$(t rbot_files_ok) $(basename "$extracted_dir")"
+                    else
+                        print_message "ERROR" "$(t rbot_copy_err)"
+                        rm -rf "$temp_extract_dir"
+                        return 1
+                    fi
                 else
-                    print_message "ERROR" "$(t rbot_copy_err)"
+                    print_message "ERROR" "$(t rbot_extract_err)"
                     rm -rf "$temp_extract_dir"
                     return 1
                 fi
             else
-                print_message "ERROR" "$(t rbot_extract_err)"
+                print_message "ERROR" "$(t rbot_unpack_err)"
                 rm -rf "$temp_extract_dir"
                 return 1
             fi
-        else
-            print_message "ERROR" "$(t rbot_unpack_err)"
             rm -rf "$temp_extract_dir"
+        fi
+    fi
+
+    if [[ "$bot_restore_scope" == "files" ]]; then
+        if ! cd "$restore_path"; then
+            print_message "ERROR" "$(t rbot_cd_fail) ${BOLD}${restore_path}${RESET}."
             return 1
         fi
-        rm -rf "$temp_extract_dir"
-    else
-        print_message "WARN" "$(t rbot_no_archive)"
-        return 1
+        if [[ ! -f "docker-compose.yml" && ! -f "docker-compose.yaml" && ! -f "compose.yml" && ! -f "compose.yaml" ]]; then
+            print_message "ERROR" "$(t rbot_no_yml)"
+            return 1
+        fi
+        print_message "INFO" "$(t rbot_start_all)"
+        if ! docker compose up -d; then
+            print_message "ERROR" "$(t rbot_start_fail)"
+            return 1
+        fi
+        sleep 3
+        return 0
     fi
-    
+
     print_message "INFO" "$(t rbot_check_vol)"
     if docker volume ls -q | grep -Fxq "$BOT_VOLUME_NAME"; then
         local containers_using_volume
@@ -1076,7 +1138,9 @@ create_panel_db_dump() {
             fi
             
             local docker_error_log=$(mktemp)
-            if ! docker exec "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"; then
+            docker exec "remnawave-db" pg_dumpall -c -U "$DB_USER" 2>"$docker_error_log" | gzip -9 > "$dump_file"
+            local dump_exit_code=${PIPESTATUS[0]}
+            if [[ $dump_exit_code -ne 0 ]]; then
                 LAST_DB_ERROR=$(cat "$docker_error_log" 2>/dev/null | head -5 | tr '\n' ' ')
                 rm -f "$docker_error_log"
                 return 1
@@ -1211,13 +1275,6 @@ send_telegram_message() {
     done
 
     local body=$(echo "$response" | head -n -1)
-
-    response=$(curl -s --connect-timeout 10 --max-time 30 -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "$url" -d chat_id="$CHAT_ID" -d text="$message" -w "\n%{http_code}")
-    http_code=$(echo "$response" | tail -n1)
-    if [[ "$http_code" -eq 200 ]]; then
-        return 0
-    fi
-
     echo -e "${RED}❌ $(t tg_send_err) ${BOLD}$http_code${RESET}"
     echo -e "$(t tg_response) ${body}"
     return 1
@@ -1477,7 +1534,14 @@ create_backup() {
     REMNAWAVE_VERSION=$(get_remnawave_version)
     TIMESTAMP=$(date +%Y-%m-%d"_"%H_%M_%S)
     BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
-    BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
+
+    local backup_scope_tag="full"
+    if [[ "$SKIP_PANEL_BACKUP" == "true" && "$BOT_BACKUP_ENABLED" == "true" ]]; then
+        backup_scope_tag="bot"
+    elif [[ "$SKIP_PANEL_BACKUP" != "true" && "$BOT_BACKUP_ENABLED" != "true" ]]; then
+        backup_scope_tag="panel"
+    fi
+    BACKUP_FILE_FINAL="remnawave_backup_${backup_scope_tag}_${TIMESTAMP}.tar.gz"
     
     mkdir -p "$BACKUP_DIR" || { 
         echo -e "${RED}❌ $(t bk_mkdir_err) ${BOLD}$BACKUP_DIR${RESET}.${RESET}"
@@ -1518,11 +1582,13 @@ create_backup() {
                 exclude_args+="--exclude=$pattern "
             done
             
-            if eval "tar -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'"; then
+            eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'" || true
+            local rw_tar_exit=${PIPESTATUS[0]}
+            if [[ $rw_tar_exit -lt 2 ]]; then
                 print_message "SUCCESS" "$(t bk_arch_ok)"
                 BACKUP_ITEMS=("$BACKUP_FILE_DB" "$REMNAWAVE_DIR_ARCHIVE")
             else
-                STATUS=$?
+                local STATUS=$rw_tar_exit
                 echo -e "${RED}❌ $(t bk_arch_err) ${BOLD}$STATUS${RESET}.${RESET}"
                 local error_msg="❌ $(t bk_arch_err) ${BOLD}${STATUS}${RESET}"
                 if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
@@ -2212,121 +2278,157 @@ restore_backup() {
     local PANEL_STATUS=2 
     local BOT_STATUS=2
 
-    if [[ -z "$PANEL_DUMP" || -z "$PANEL_DIR_ARCHIVE" ]]; then
+    if [[ -z "$PANEL_DUMP" && -z "$PANEL_DIR_ARCHIVE" ]]; then
         print_message "WARN" "$(t rs_panel_missing)"
         PANEL_STATUS=2
     else
-        print_message "WARN" "$(t rs_panel_found)"
-        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_panel_q) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" confirm_panel
-        echo ""
-        if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
-            check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
-            print_message "INFO" "$(t rs_enter_dbname)"
-            read -rp "$(t input_prompt)" restore_db_name
-            restore_db_name="${restore_db_name:-postgres}"
+        local restore_scope="all"
+        local scope_cancelled=false
 
-            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
-                if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
-                    cd ~
-                    rm -rf "$REMNALABS_ROOT_DIR"
-                fi
-
-                mkdir -p "$REMNALABS_ROOT_DIR"
-                local extract_dir="$BACKUP_DIR/extract_temp_$$"
-                mkdir -p "$extract_dir"
-                tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
-                local extracted_dir
-                extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-                cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
-                rm -rf "$extract_dir"
-
-                docker volume rm remnawave-db-data 2>/dev/null || true
-                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
-                docker compose up -d remnawave-db
-
-                print_message "INFO" "$(t rs_wait_db)"
-                until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
-                    sleep 2
-                    echo -n "."
-                done
-                echo ""
-            else
-                if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
-                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
-                    cd ~
-                    rm -rf "$REMNALABS_ROOT_DIR"
-                fi
-
-                mkdir -p "$REMNALABS_ROOT_DIR"
-                local extract_dir="$BACKUP_DIR/extract_temp_$$"
-                mkdir -p "$extract_dir"
-                tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
-                local extracted_dir
-                extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-                cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
-                rm -rf "$extract_dir"
-                
-                print_message "INFO" "$(t rs_check_ext)"
-                local pg_image=$(get_postgres_image)
-                if ! docker run --rm --network host \
-                    -e PGPASSWORD="$DB_PASSWORD" \
-                    -e PGSSLMODE="$DB_SSL_MODE" \
-                    "$pg_image" \
-                    pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; then
-                    print_message "ERROR" "$(t rs_ext_unavail) (${DB_HOST}:${DB_PORT}). $(t rs_check_conn)"
-                    rm -rf "$temp_restore_dir"
-                    read -rp "$(t press_enter_back)"
-                    return 1
-                fi
-                print_message "SUCCESS" "$(t rs_ext_ok)"
-            fi
-
-            print_message "INFO" "$(t rs_restoring_db)"
-            gunzip "$PANEL_DUMP"
-            local sql_file="${PANEL_DUMP%.gz}"
-            local restore_log="$temp_restore_dir/restore_errors.log"
-
-            if ! restore_panel_db_dump "$sql_file" "$restore_db_name" "$restore_log"; then
-                echo ""
-                print_message "ERROR" "$(t rs_db_err)"
-                [[ -f "$restore_log" ]] && cat "$restore_log"
-                rm -rf "$temp_restore_dir"
-                read -rp "$(t press_enter_back)"
-                return 1
-            fi
-
-            print_message "SUCCESS" "$(t rs_db_ok)"
+        if [[ -n "$PANEL_DUMP" && -n "$PANEL_DIR_ARCHIVE" ]]; then
+            print_message "WARN" "$(t rs_panel_found)"
             echo ""
-            
-            if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
-                print_message "INFO" "$(t rs_start_containers)"
-                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
-                if docker compose up -d; then
-                    print_message "SUCCESS" "$(t rs_panel_ok)"
-                    PANEL_STATUS=0
-                else
-                    print_message "ERROR" "$(t rs_panel_fail)"
-                    rm -rf "$temp_restore_dir"
-                    read -rp "$(t press_enter_back)"
-                    return 1
-                fi
-            else
-                cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
-                print_message "INFO" "$(t rs_start_no_db)"
-                if docker compose up -d; then
-                    print_message "SUCCESS" "$(t rs_panel_ok)"
-                    PANEL_STATUS=0
-                else
-                    print_message "ERROR" "$(t rs_panel_fail)"
-                    rm -rf "$temp_restore_dir"
-                    read -rp "$(t press_enter_back)"
-                    return 1
-                fi
-            fi
+            echo " 1. $(t rs_scope_all)"
+            echo " 2. $(t rs_scope_db)"
+            echo " 3. $(t rs_scope_files)"
+            echo " 0. $(t back)"
+            echo ""
+            local scope_choice
+            read -rp "${GREEN}[?]${RESET} $(t select_option)" scope_choice
+            echo ""
+            case "$scope_choice" in
+                1) restore_scope="all" ;;
+                2) restore_scope="db" ;;
+                3) restore_scope="files" ;;
+                0) scope_cancelled=true ;;
+                *) print_message "ERROR" "$(t invalid_input_select)"; scope_cancelled=true ;;
+            esac
+        elif [[ -n "$PANEL_DUMP" ]]; then
+            restore_scope="db"
+            print_message "WARN" "$(t rs_scope_only_db_found)"
         else
+            restore_scope="files"
+            print_message "WARN" "$(t rs_scope_only_files_found)"
+        fi
+
+        if [[ "$scope_cancelled" == true ]]; then
             print_message "INFO" "$(t rs_panel_skipped)"
             PANEL_STATUS=2
+        else
+            read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_panel_q) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" confirm_panel
+            echo ""
+            if [[ "$confirm_panel" =~ ^[Yy]$ ]]; then
+                check_docker_installed || { rm -rf "$temp_restore_dir"; return 1; }
+
+                if [[ "$restore_scope" != "files" ]]; then
+                    print_message "INFO" "$(t rs_enter_dbname)"
+                    read -rp "$(t input_prompt)" restore_db_name
+                    restore_db_name="${restore_db_name:-postgres}"
+                fi
+
+                if [[ "$restore_scope" == "db" ]]; then
+                    if ! (cd "$REMNALABS_ROOT_DIR" 2>/dev/null && { [[ -f docker-compose.yml ]] || [[ -f docker-compose.yaml ]] || [[ -f compose.yml ]] || [[ -f compose.yaml ]]; }); then
+                        print_message "ERROR" "$(t rs_files_required_first)"
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
+                fi
+
+                if [[ -d "$REMNALABS_ROOT_DIR" ]]; then
+                    cd "$REMNALABS_ROOT_DIR" 2>/dev/null && docker compose down 2>/dev/null
+                    cd ~
+                fi
+
+                if [[ "$restore_scope" != "db" ]]; then
+                    rm -rf "$REMNALABS_ROOT_DIR"
+                    mkdir -p "$REMNALABS_ROOT_DIR"
+                    local extract_dir="$BACKUP_DIR/extract_temp_$$"
+                    mkdir -p "$extract_dir"
+                    tar -xzf "$PANEL_DIR_ARCHIVE" -C "$extract_dir"
+                    local extracted_dir
+                    extracted_dir=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+                    cp -rf "$extracted_dir"/. "$REMNALABS_ROOT_DIR/"
+                    rm -rf "$extract_dir"
+                fi
+
+                if [[ "$restore_scope" == "files" ]]; then
+                    print_message "INFO" "$(t rs_start_containers)"
+                    cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
+                    if docker compose up -d; then
+                        print_message "SUCCESS" "$(t rs_panel_ok)"
+                        PANEL_STATUS=0
+                    else
+                        print_message "ERROR" "$(t rs_panel_fail)"
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
+                else
+                    if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                        docker volume rm remnawave-db-data 2>/dev/null || true
+                        cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
+                        docker compose up -d remnawave-db
+
+                        print_message "INFO" "$(t rs_wait_db)"
+                        until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
+                            sleep 2
+                            echo -n "."
+                        done
+                        echo ""
+                    else
+                        print_message "INFO" "$(t rs_check_ext)"
+                        local pg_image=$(get_postgres_image)
+                        if ! docker run --rm --network host \
+                            -e PGPASSWORD="$DB_PASSWORD" \
+                            -e PGSSLMODE="$DB_SSL_MODE" \
+                            "$pg_image" \
+                            pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; then
+                            print_message "ERROR" "$(t rs_ext_unavail) (${DB_HOST}:${DB_PORT}). $(t rs_check_conn)"
+                            rm -rf "$temp_restore_dir"
+                            read -rp "$(t press_enter_back)"
+                            return 1
+                        fi
+                        print_message "SUCCESS" "$(t rs_ext_ok)"
+                    fi
+
+                    print_message "INFO" "$(t rs_restoring_db)"
+                    gunzip "$PANEL_DUMP"
+                    local sql_file="${PANEL_DUMP%.gz}"
+                    local restore_log="$temp_restore_dir/restore_errors.log"
+
+                    if ! restore_panel_db_dump "$sql_file" "$restore_db_name" "$restore_log"; then
+                        echo ""
+                        print_message "ERROR" "$(t rs_db_err)"
+                        [[ -f "$restore_log" ]] && cat "$restore_log"
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
+
+                    print_message "SUCCESS" "$(t rs_db_ok)"
+                    echo ""
+
+                    if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
+                        print_message "INFO" "$(t rs_start_containers)"
+                    else
+                        print_message "INFO" "$(t rs_start_no_db)"
+                    fi
+                    cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
+                    if docker compose up -d; then
+                        print_message "SUCCESS" "$(t rs_panel_ok)"
+                        PANEL_STATUS=0
+                    else
+                        print_message "ERROR" "$(t rs_panel_fail)"
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
+                fi
+            else
+                print_message "INFO" "$(t rs_panel_skipped)"
+                PANEL_STATUS=2
+            fi
         fi
     fi
 
@@ -2517,6 +2619,23 @@ remove_script() {
         return
     fi
 
+    local keep_backups="n"
+    if [[ -d "$BACKUP_DIR" ]] && compgen -G "$BACKUP_DIR"/* > /dev/null 2>&1; then
+        echo -e -n "$(t rm_keep_backups_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
+        read -r keep_backups
+        echo ""
+        if [[ "${keep_backups,,}" == "y" ]]; then
+            local saved_backups_dir="/opt/rw-backup-restore-saved"
+            mkdir -p "$saved_backups_dir"
+            if mv "$BACKUP_DIR"/* "$saved_backups_dir"/ 2>/dev/null; then
+                print_message "SUCCESS" "$(t rm_backups_saved) ${BOLD}${saved_backups_dir}${RESET}"
+            else
+                print_message "WARN" "$(t rm_backups_save_fail)"
+            fi
+            echo ""
+        fi
+    fi
+
     print_message "INFO" "$(t rm_cron_removing)"
     if crontab -l 2>/dev/null | grep -qF "$SCRIPT_PATH backup"; then
         (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
@@ -2542,6 +2661,15 @@ remove_script() {
     else
         print_message "INFO" "$(t rm_dir_none) ${BOLD}${INSTALL_DIR}${RESET}"
     fi
+
+    if [[ "${keep_backups,,}" == "y" ]]; then
+        echo ""
+        print_message "SUCCESS" "$(t rm_backups_reminder_title)"
+        echo -e "${BOLD}/opt/rw-backup-restore-saved${RESET}"
+        echo ""
+        echo "$(t rm_backups_reminder_howto)"
+    fi
+
     exit 0
 }
 
@@ -2790,17 +2918,28 @@ configure_settings() {
                                 while [[ $attempt -le $max_attempts ]]; do
                                     print_message "INFO" "$(printf "$(t st_tg_proxy_attempt)" "$attempt" "$max_attempts")"
                                     local start_time=$SECONDS
-                                    if curl -s --connect-timeout 10 --max-time 15 \
+                                    local curl_output curl_exit
+                                    if curl_output=$(curl -s --connect-timeout 10 --max-time 15 \
                                         --proxy "$TG_PROXY" \
-                                        "https://api.telegram.org/bot$BOT_TOKEN/getMe" \
-                                        >/dev/null 2>&1; then
-                                        local elapsed=$((SECONDS - start_time))
+                                        "https://api.telegram.org/bot$BOT_TOKEN/getMe" 2>&1); then
+                                        curl_exit=0
+                                    else
+                                        curl_exit=$?
+                                    fi
+                                    local elapsed=$((SECONDS - start_time))
+                                    if [[ $curl_exit -eq 0 && "$curl_output" == *'"ok":true'* ]]; then
                                         print_message "SUCCESS" "$(printf "$(t st_tg_proxy_test_ok)" "$elapsed")"
                                         success=true
                                         break
                                     else
-                                        local elapsed=$((SECONDS - start_time))
                                         print_message "ERROR" "$(printf "$(t st_tg_proxy_attempt_fail)" "$attempt" "$elapsed")"
+                                        case $curl_exit in
+                                            0)  echo -e "${YELLOW}Details: Connected, but Telegram did not confirm the bot token: ${curl_output}${RESET}" ;;
+                                            7)  echo -e "${YELLOW}Details: Could not connect to proxy (exit $curl_exit)${RESET}" ;;
+                                            28) echo -e "${YELLOW}Details: Connection timed out (exit $curl_exit)${RESET}" ;;
+                                            35) echo -e "${YELLOW}Details: SSL handshake failed (exit $curl_exit)${RESET}" ;;
+                                            *)  echo -e "${YELLOW}Details: curl error (exit $curl_exit): ${curl_output}${RESET}" ;;
+                                        esac
                                         if [[ $attempt -lt $max_attempts ]]; then
                                             sleep 5
                                         fi
