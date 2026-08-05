@@ -21,12 +21,16 @@
 - interactive menu
 - manual and scheduled automatic backup creation
 - backup/restore in panel+bot, panel only, and bot only modes
+- **selective restore**: everything (DB + files), database only, or files only — separately for the panel and the bot
+- backup file names reflect their content (`full` / `panel` / `bot`) — instantly clear what's inside
 - external PostgreSQL support
 - notifications directly to Telegram bot or group topic with attached backup
 - script version update notifications
 - backup size check before sending to TG and limit exceeded notification
 - backup upload to Google Drive or S3 Storage (optional)
-- configurable backup retention policy for server-side and S3 backups separately
+- S3 connection test and Telegram proxy test with detailed error diagnostics
+- configurable backup retention policy for server-side (in days or hours) and S3 backups separately
+- option to keep local backups in a separate directory when uninstalling the script
 
 ## Additional migration instructions:
 
@@ -106,6 +110,16 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 - you're all set! All that's left is to install and configure any other services you need (e.g. kuma, beszel, etc.)
   
 </details>
+
+## About selective restore
+
+If a backup contains both a database dump and files (for the panel or the bot), the script will ask what to restore:
+
+- **Everything** — DB and files together
+- **Database only** — the DB volume is recreated from scratch, panel/bot files are left untouched. Requires the directory with an already installed panel/bot to exist
+- **Files only** — files and configuration are replaced, the database is left untouched
+
+This is useful, for example, when you need to roll back only the database after a failed update without touching current settings and files.
 
 ## Installation (requires root):
 
