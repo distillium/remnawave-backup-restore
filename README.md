@@ -133,39 +133,12 @@ curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawa
 
 ## 💎 Support the Project
 
-<br>
-
-<table>
-  <thead>
-    <tr>
-      <th width="120">Network</th>
-      <th width="480">USDT Address</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><b>BSC</b></td>
-      <td><code>0x8b91f0c1ad7d03aa2427c342db81e3aee04b12a5</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>TRON</b></td>
-      <td><code>TEB6RzsH15qkguYWCCCeHDTKUEVE2qSEH2</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>TON</b></td>
-      <td><code>UQD2br2gNfuFEfK4uiki78bxFCiPdN7OLYqZ6EHkNtivemQ1</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>SOL</b></td>
-      <td><code>Hieo9WK2oTcURmkXj1WAccBSRzSDsuLyvs4s5jH7C6kS</code></td>
-    </tr>
-  </tbody>
-</table>
-
-<br>
-
-Thank you for your support! 🙏
-
-<br>
-
-</div>
+<p align="center">
+  <a href="https://t.me/tribute/app?startapp=dRNM">
+    <img src="https://img.shields.io/badge/Donate-Telegram%20Mini%20App-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Donate via Telegram">
+  </a>
+  &nbsp;
+  <a href="https://web.tribute.tg/d/RNM">
+    <img src="https://img.shields.io/badge/Donate-Tribute%20Web-8A2BE2?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Donate via Tribute Web">
+  </a>
+</p>
