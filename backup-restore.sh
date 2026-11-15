@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.0"
+VERSION="4.2.1"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -888,8 +888,8 @@ restore_bot_backup() {
         
             mkdir -p "$temp_restore_dir"
 
-            local restore_bot_db_user restore_bot_db_name
-            read -r restore_bot_db_user restore_bot_db_name <<< "$(_container_pg_identity "$BOT_CONTAINER_NAME")"
+            local restore_bot_db_user restore_bot_db_name="postgres"
+            read -r restore_bot_db_user _ <<< "$(_container_pg_identity "$BOT_CONTAINER_NAME")"
 
             if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
                 print_message "ERROR" "$(t rbot_db_err)"
@@ -1534,7 +1534,10 @@ restore_panel_db_dump() {
     
     case "$DB_CONNECTION_TYPE" in
         docker)
-            if ! docker exec -i remnawave-db psql -q -U "$DB_USER" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
+            local restore_db_user
+            restore_db_user=$(_container_pg_identity remnawave-db | awk '{print $1}')
+            restore_db_user="${restore_db_user:-$DB_USER}"
+            if ! docker exec -i remnawave-db psql -q -U "$restore_db_user" -d "$restore_db_name" > /dev/null 2> "$restore_log" < "$sql_file"; then
                 return 1
             fi
             ;;
@@ -3413,12 +3416,17 @@ restore_backup() {
     local BACKUP_META_DB_NAME=""
     
     if [[ -f "$temp_restore_dir/backup_meta.info" ]]; then
-        source "$temp_restore_dir/backup_meta.info"
-        BACKUP_DUMP_TYPE="${DUMP_TYPE:-dumpall}"
-        BACKUP_META_VERSION="${BACKUP_VERSION:-}"
-        BACKUP_META_DB_NAME="${DB_NAME:-}"
-        
-        BACKUP_PANEL_VERSION="${PANEL_VERSION:-}"
+        local -a _meta=()
+        mapfile -t _meta < <(
+            DUMP_TYPE="" BACKUP_VERSION="" DB_NAME="" PANEL_VERSION="" BOT_META_VERSION=""
+            source "$temp_restore_dir/backup_meta.info" >/dev/null 2>&1
+            printf '%s\n' "$DUMP_TYPE" "$BACKUP_VERSION" "$DB_NAME" "$PANEL_VERSION" "$BOT_META_VERSION"
+        )
+        BACKUP_DUMP_TYPE="${_meta[0]:-dumpall}"
+        BACKUP_META_VERSION="${_meta[1]:-}"
+        BACKUP_META_DB_NAME="${_meta[2]:-}"
+        BACKUP_PANEL_VERSION="${_meta[3]:-}"
+        BOT_META_VERSION="${_meta[4]:-}"
         local -a meta_rows=(
             "$(t rs_meta_dump):" "$BACKUP_DUMP_TYPE"
             "$(t rs_meta_ver):" "$(_ver_disp "$BACKUP_META_VERSION")"
@@ -3646,11 +3654,10 @@ restore_backup() {
 
                 local restore_db_name
                 if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
-                    restore_db_name=$(_container_pg_identity remnawave-db | awk '{print $2}')
+                    restore_db_name="postgres"
                 else
-                    restore_db_name="$DB_NAME"
+                    restore_db_name="${DB_NAME:-postgres}"
                 fi
-                restore_db_name="${restore_db_name:-postgres}"
 
                 if ! restore_panel_db_dump "$sql_file" "$restore_db_name" "$restore_log"; then
                     echo ""
