@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.8"
+VERSION="4.2.9"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -166,6 +166,7 @@ _UI_MENU_WINDOWED=0
 _UI_MENU_FOOTER=()
 _UI_MENU_TYPED=""
 _UI_MENU_WARN=""
+_UI_MENU_KW=1
 
 ui_menu_reset() {
     _UI_MENU_KEYS=()
@@ -211,10 +212,12 @@ _ui_menu_draw() {
             printf '\r\e[2K\n'; lines=$((lines + 1)); continue
         fi
         st=$(_ui_menu_style "${_UI_MENU_STYLES[$i]}")
+        local num
+        num=$(printf '%*s' "$_UI_MENU_KW" "${_UI_MENU_KEYS[$i]}")
         if (( i == sel )); then
-            printf '\r\e[2K %s▸%s %s%s %s. %s %s\n' "${GREEN}${BOLD}" "$RESET" "$UI_SEL_BG" "$BOLD" "${_UI_MENU_KEYS[$i]}" "${_UI_MENU_LABELS[$i]}" "$RESET"
+            printf '\r\e[2K %s▸%s %s%s %s. %s %s\n' "${GREEN}${BOLD}" "$RESET" "$UI_SEL_BG" "$BOLD" "$num" "${_UI_MENU_LABELS[$i]}" "$RESET"
         else
-            printf '\r\e[2K   %s %s. %s %s\n' "$st" "${_UI_MENU_KEYS[$i]}" "${_UI_MENU_LABELS[$i]}" "$RESET"
+            printf '\r\e[2K   %s %s. %s %s\n' "$st" "$num" "${_UI_MENU_LABELS[$i]}" "$RESET"
         fi
         lines=$((lines + 1))
     done
@@ -275,11 +278,15 @@ ui_menu_choose() {
     _UI_MENU_TYPED=""
     _UI_MENU_WARN=""
     ui_spin_stop
+    _UI_MENU_KW=1
+    for i in "${_UI_MENU_KEYS[@]}"; do
+        (( ${#i} > _UI_MENU_KW )) && _UI_MENU_KW=${#i}
+    done
 
     if ! _ui_interactive; then
         for ((i = 0; i < n; i++)); do
             if [[ "${_UI_MENU_STYLES[$i]}" == "gap" ]]; then echo ""; continue; fi
-            echo -e " $(_ui_menu_style "${_UI_MENU_STYLES[$i]}")${_UI_MENU_KEYS[$i]}. ${_UI_MENU_LABELS[$i]}${RESET}"
+            echo -e " $(_ui_menu_style "${_UI_MENU_STYLES[$i]}")$(printf '%*s' "$_UI_MENU_KW" "${_UI_MENU_KEYS[$i]}"). ${_UI_MENU_LABELS[$i]}${RESET}"
         done
         for i in "${_UI_MENU_FOOTER[@]}"; do echo -e "   ${LIGHT_GRAY}${i}${RESET}"; done
         echo ""
@@ -424,6 +431,27 @@ ui_secret() {
     fi
     printf -v "$__var" '%s' "$value"
     return 0
+}
+
+ui_confirm() {
+    local __var="$1" q="${2:-}" ans
+    ui_spin_stop
+    while true; do
+        if ! read -rp "$(echo -e "${GREEN}[?]${RESET} ${q:+$q }(${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}): ")" ans; then
+            echo ""
+            printf -v "$__var" '%s' "n"
+            return 0
+        fi
+        case "${ans,,}" in
+            y) printf -v "$__var" '%s' "y"; return 0 ;;
+            n) printf -v "$__var" '%s' "n"; return 0 ;;
+        esac
+        if [[ -n "$(LC_ALL=C tr -d '\000-\177' <<< "$ans")" ]]; then
+            echo -e "    ${YELLOW}$(t ui_yn_layout)${RESET}"
+        else
+            echo -e "    ${YELLOW}$(t ui_yn_invalid)${RESET}"
+        fi
+    done
 }
 
 _UI_SPIN_PID=""
@@ -632,8 +660,7 @@ configure_bot_backup() {
 
                 if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
                     echo ""
-                    print_message "ACTION" "$(t bot_disable_panel)"
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} (${GREEN}y${RESET}/${RED}n${RESET}): ")" only_bot_confirm
+                    ui_confirm only_bot_confirm "$(t bot_disable_panel)"
                     if [[ "$only_bot_confirm" =~ ^[yY]$ ]]; then
                         SKIP_PANEL_BACKUP="true"
                     fi
@@ -655,7 +682,7 @@ configure_bot_backup() {
 
                 if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
                     print_message "WARN" "$(t bot_panel_also_off)"
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t bot_enable_panel_back) (y/n): ")" restore_p
+                    ui_confirm restore_p "$(t bot_enable_panel_back)"
                     if [[ "$restore_p" =~ ^[yY]$ ]]; then
                         SKIP_PANEL_BACKUP="false"
                         print_message "SUCCESS" "$(t bot_panel_restored)"
@@ -792,7 +819,7 @@ _wait_container_healthy() {
 check_docker_installed() {
     if ! command -v docker &> /dev/null; then
         print_message "ERROR" "$(t docker_missing)"
-        read -rp "${GREEN}[?]${RESET} $(t docker_install_q) (${GREEN}y${RESET}/${RED}n${RESET}): " install_choice
+        ui_confirm install_choice "$(t docker_install_q)"
         
         if [[ "$install_choice" =~ ^[Yy]$ ]]; then
             print_message "INFO" "$(t docker_installing)"
@@ -906,7 +933,7 @@ restore_bot_backup() {
     clear
     print_message "INFO" "$(t rbot_found)"
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_restore_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" restore_bot_confirm
+    ui_confirm restore_bot_confirm "$(t rbot_restore_q)"
     
     if [[ ! "$restore_bot_confirm" =~ ^[yY]$ ]]; then
         print_message "INFO" "$(t rbot_cancelled)"
@@ -991,7 +1018,7 @@ restore_bot_backup() {
     print_message "WARN" "${YELLOW}$(t rbot_warn_stop)${RESET}"
     print_message "WARN" "$(t rbot_warn_conflict)"
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_continue_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" stop_confirm
+    ui_confirm stop_confirm "$(t rbot_continue_q)"
     
     if [[ ! "$stop_confirm" =~ ^[yY]$ ]]; then
         print_message "INFO" "$(t rbot_stop_first)"
@@ -1318,6 +1345,7 @@ S3_BUCKET="$S3_BUCKET"
 S3_REGION="$S3_REGION"
 S3_PREFIX="$S3_PREFIX"
 S3_RETAIN_DAYS="$S3_RETAIN_DAYS"
+S3_LIMIT_GB="$S3_LIMIT_GB"
 S3_NAME="$S3_NAME"
 S3_COUNT="${S3_COUNT:-1}"
 S3_2_NAME="$S3_2_NAME"
@@ -1328,6 +1356,7 @@ S3_2_BUCKET="$S3_2_BUCKET"
 S3_2_REGION="$S3_2_REGION"
 S3_2_PREFIX="$S3_2_PREFIX"
 S3_2_RETAIN_DAYS="$S3_2_RETAIN_DAYS"
+S3_2_LIMIT_GB="$S3_2_LIMIT_GB"
 S3_3_NAME="$S3_3_NAME"
 S3_3_ENDPOINT="$S3_3_ENDPOINT"
 S3_3_ACCESS_KEY="$S3_3_ACCESS_KEY"
@@ -1336,6 +1365,7 @@ S3_3_BUCKET="$S3_3_BUCKET"
 S3_3_REGION="$S3_3_REGION"
 S3_3_PREFIX="$S3_3_PREFIX"
 S3_3_RETAIN_DAYS="$S3_3_RETAIN_DAYS"
+S3_3_LIMIT_GB="$S3_3_LIMIT_GB"
 S3_4_NAME="$S3_4_NAME"
 S3_4_ENDPOINT="$S3_4_ENDPOINT"
 S3_4_ACCESS_KEY="$S3_4_ACCESS_KEY"
@@ -1344,6 +1374,7 @@ S3_4_BUCKET="$S3_4_BUCKET"
 S3_4_REGION="$S3_4_REGION"
 S3_4_PREFIX="$S3_4_PREFIX"
 S3_4_RETAIN_DAYS="$S3_4_RETAIN_DAYS"
+S3_4_LIMIT_GB="$S3_4_LIMIT_GB"
 S3_5_NAME="$S3_5_NAME"
 S3_5_ENDPOINT="$S3_5_ENDPOINT"
 S3_5_ACCESS_KEY="$S3_5_ACCESS_KEY"
@@ -1352,6 +1383,7 @@ S3_5_BUCKET="$S3_5_BUCKET"
 S3_5_REGION="$S3_5_REGION"
 S3_5_PREFIX="$S3_5_PREFIX"
 S3_5_RETAIN_DAYS="$S3_5_RETAIN_DAYS"
+S3_5_LIMIT_GB="$S3_5_LIMIT_GB"
 RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 RETAIN_BACKUPS_VALUE="${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}"
 RETAIN_BACKUPS_UNIT="${RETAIN_BACKUPS_UNIT:-days}"
@@ -1407,6 +1439,7 @@ load_or_create_config() {
         S3_REGION=${S3_REGION:-}
         S3_PREFIX=${S3_PREFIX:-}
         S3_RETAIN_DAYS=${S3_RETAIN_DAYS:-30}
+        S3_LIMIT_GB=${S3_LIMIT_GB:-}
         S3_NAME=${S3_NAME:-}
         S3_COUNT=${S3_COUNT:-1}
         [[ "$S3_COUNT" -lt 1 ]] && S3_COUNT=1
@@ -1419,6 +1452,7 @@ load_or_create_config() {
         S3_2_REGION=${S3_2_REGION:-}
         S3_2_PREFIX=${S3_2_PREFIX:-}
         S3_2_RETAIN_DAYS=${S3_2_RETAIN_DAYS:-30}
+        S3_2_LIMIT_GB=${S3_2_LIMIT_GB:-}
         S3_3_NAME=${S3_3_NAME:-}
         S3_3_ENDPOINT=${S3_3_ENDPOINT:-}
         S3_3_ACCESS_KEY=${S3_3_ACCESS_KEY:-}
@@ -1427,6 +1461,7 @@ load_or_create_config() {
         S3_3_REGION=${S3_3_REGION:-}
         S3_3_PREFIX=${S3_3_PREFIX:-}
         S3_3_RETAIN_DAYS=${S3_3_RETAIN_DAYS:-30}
+        S3_3_LIMIT_GB=${S3_3_LIMIT_GB:-}
         S3_4_NAME=${S3_4_NAME:-}
         S3_4_ENDPOINT=${S3_4_ENDPOINT:-}
         S3_4_ACCESS_KEY=${S3_4_ACCESS_KEY:-}
@@ -1435,6 +1470,7 @@ load_or_create_config() {
         S3_4_REGION=${S3_4_REGION:-}
         S3_4_PREFIX=${S3_4_PREFIX:-}
         S3_4_RETAIN_DAYS=${S3_4_RETAIN_DAYS:-30}
+        S3_4_LIMIT_GB=${S3_4_LIMIT_GB:-}
         S3_5_NAME=${S3_5_NAME:-}
         S3_5_ENDPOINT=${S3_5_ENDPOINT:-}
         S3_5_ACCESS_KEY=${S3_5_ACCESS_KEY:-}
@@ -1443,6 +1479,7 @@ load_or_create_config() {
         S3_5_REGION=${S3_5_REGION:-}
         S3_5_PREFIX=${S3_5_PREFIX:-}
         S3_5_RETAIN_DAYS=${S3_5_RETAIN_DAYS:-30}
+        S3_5_LIMIT_GB=${S3_5_LIMIT_GB:-}
         RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         RETAIN_BACKUPS_VALUE=${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}
         RETAIN_BACKUPS_UNIT=${RETAIN_BACKUPS_UNIT:-days}
@@ -1510,7 +1547,7 @@ load_or_create_config() {
     
                     if [[ ! -d "$custom_remnawave_path" ]]; then
                         print_message "WARN" "$(t cfg_dir_missing) ${BOLD}${custom_remnawave_path}${RESET}"
-                        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t cfg_continue_path) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_path
+                        ui_confirm confirm_custom_path "$(t cfg_continue_path)"
                         if [[ "$confirm_custom_path" != "y" ]]; then
                             echo ""
                             read -rp "$(t press_enter)"
@@ -1555,8 +1592,8 @@ load_or_create_config() {
             local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
             print_message "LINK" "$(t cfg_gd_guide) ${CYAN}${guide_url}${RESET}"
             echo ""
-            [[ -z "$GD_CLIENT_ID" ]] && read -rp "   $(t cfg_enter_gd_id)" GD_CLIENT_ID
-            [[ -z "$GD_CLIENT_SECRET" ]] && read -rp "   $(t cfg_enter_gd_secret)" GD_CLIENT_SECRET
+            [[ -z "$GD_CLIENT_ID" ]] && ui_input GD_CLIENT_ID "$(t cfg_enter_gd_id)"
+            [[ -z "$GD_CLIENT_SECRET" ]] && ui_input GD_CLIENT_SECRET "$(t cfg_enter_gd_secret)"
             clear
             
             if [[ -z "$GD_REFRESH_TOKEN" ]]; then
@@ -2162,6 +2199,98 @@ _s3_configured_nums() {
     done
 }
 
+STORAGE_CACHE="$INSTALL_DIR/.storage_usage"
+
+_disk_usage() {
+    local dir="$BACKUP_DIR"
+    [[ -d "$dir" ]] || dir="/"
+    df -B1 --output=used,size "$dir" 2>/dev/null | awk 'NR==2 {print $1, $2}'
+}
+
+_usage_text() {
+    local used="$1" total="${2:-}"
+    if [[ -n "$total" && "$total" -gt 0 ]]; then
+        printf "$(t usage_of)" "$(_ui_human_size "$used")" "$(_ui_human_size "$total")" "$(( used * 100 / total ))"
+    else
+        _ui_human_size "$used"
+    fi
+}
+
+_usage_color() {
+    local used="$1" total="${2:-}" pct
+    if [[ -z "$total" || "$total" -le 0 ]]; then
+        printf '%s' "$BOLD"
+        return 0
+    fi
+    pct=$(( used * 100 / total ))
+    if (( pct >= 90 )); then
+        printf '%s' "${RED}${BOLD}"
+    elif (( pct >= 80 )); then
+        printf '%s' "${YELLOW}${BOLD}"
+    else
+        printf '%s' "$BOLD"
+    fi
+}
+
+_s3_usage_id() {
+    printf '%s|%s|%s' "$(_s3_var ENDPOINT "$1")" "$(_s3_var BUCKET "$1")" "$(_s3_var PREFIX "$1")"
+}
+
+_s3_limit_bytes() {
+    local gb
+    gb=$(_s3_var LIMIT_GB "$1")
+    if [[ "$gb" =~ ^[0-9]+$ && "$gb" -gt 0 ]]; then
+        echo $(( gb * 1024 * 1024 * 1024 ))
+    fi
+    return 0
+}
+
+_s3_measure_usage() {
+    local s3_num="$1" out bytes id endpoint_arg="" prefix
+    command -v aws &>/dev/null || return 1
+    [[ -n "$(_s3_var ENDPOINT "$s3_num")" ]] && endpoint_arg="--endpoint-url $(_s3_var ENDPOINT "$s3_num")"
+    prefix=$(_s3_var PREFIX "$s3_num")
+    out=$(AWS_ACCESS_KEY_ID="$(_s3_var ACCESS_KEY "$s3_num")" \
+          AWS_SECRET_ACCESS_KEY="$(_s3_var SECRET_KEY "$s3_num")" \
+          AWS_DEFAULT_REGION="$(_s3_var REGION "$s3_num")" \
+          aws s3 ls "s3://$(_s3_var BUCKET "$s3_num")/${prefix:+${prefix}/}" --recursive --summarize \
+          $endpoint_arg 2>/dev/null) || return 1
+    bytes=$(awk -F': *' '/Total Size/ {print $2; exit}' <<< "$out")
+    [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+    id=$(_s3_usage_id "$s3_num")
+    if [[ -d "$INSTALL_DIR" ]]; then
+        { grep -vF "${id}|" "$STORAGE_CACHE" 2>/dev/null || true; echo "${id}|${bytes}|$(date +%s)"; } > "${STORAGE_CACHE}.tmp" \
+            && mv "${STORAGE_CACHE}.tmp" "$STORAGE_CACHE"
+        chmod 600 "$STORAGE_CACHE" 2>/dev/null || true
+    fi
+    echo "$bytes"
+}
+
+_s3_cached_usage() {
+    local id
+    id=$(_s3_usage_id "$1")
+    [[ -f "$STORAGE_CACHE" ]] || return 0
+    grep -F "${id}|" "$STORAGE_CACHE" 2>/dev/null | tail -1 | awk -F'|' '{print $4}'
+    return 0
+}
+
+_usage_tg_lines() {
+    local lines="" du used total s3_num bytes
+    du=$(_disk_usage)
+    if [[ -n "$du" ]]; then
+        read -r used total <<< "$du"
+        lines+=$'\n'"• *$(t usage_disk):* $(_usage_text "$used" "$total")"
+    fi
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        while IFS= read -r s3_num; do
+            bytes=$(_s3_measure_usage "$s3_num" 2>/dev/null) || bytes=""
+            [[ -n "$bytes" ]] || continue
+            lines+=$'\n'"• *$(_s3_label "$s3_num"):* $(_usage_text "$bytes" "$(_s3_limit_bytes "$s3_num")")"
+        done < <(_s3_configured_nums)
+    fi
+    printf '%s' "$lines"
+}
+
 send_s3_document() {
     local file_path="$1"
     local s3_num="$2"
@@ -2364,7 +2493,7 @@ test_s3_connection() {
 
 _s3_shift_down() {
     local from_num="$1"
-    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS)
+    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS LIMIT_GB)
     local i field value
     for ((i=from_num; i<S3_COUNT; i++)); do
         for field in "${fields[@]}"; do
@@ -2405,6 +2534,17 @@ s3_target_menu() {
         print_message "INFO" "$(t st_s3_secret) ${BOLD}${s3_secret:+****}${RESET}"
         print_message "INFO" "$(t st_s3_prefix) ${BOLD}${s3_prefix:-$(t root_folder)}${RESET}"
         print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" "$(t st_retention_days)")${RESET}"
+        local s3_limit_gb s3_used_cached
+        s3_limit_gb=$(_s3_var LIMIT_GB "$s3_num")
+        if [[ "$s3_limit_gb" =~ ^[0-9]+$ && "$s3_limit_gb" -gt 0 ]]; then
+            print_message "INFO" "$(t st_s3_limit) ${BOLD}${s3_limit_gb} $(t gb_unit)${RESET}"
+        else
+            print_message "INFO" "$(t st_s3_limit) ${BOLD}$(t st_s3_limit_none)${RESET}"
+        fi
+        s3_used_cached=$(_s3_cached_usage "$s3_num")
+        if [[ -n "$s3_used_cached" ]]; then
+            print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$s3_used_cached" "$(_s3_limit_bytes "$s3_num")")${RESET}"
+        fi
         echo ""
         ui_menu_reset
         ui_menu_add 1 "$(t st_s3_change_name)"
@@ -2415,7 +2555,8 @@ s3_target_menu() {
         ui_menu_add 6 "$(t st_s3_change_secret)"
         ui_menu_add 7 "$(t st_s3_change_prefix)"
         ui_menu_add 8 "$(t st_retention_change_s3)"
-        ui_menu_add 9 "$(t st_s3_test)"
+        ui_menu_add 9 "$(t st_s3_change_limit)"
+        ui_menu_add 10 "$(t st_s3_test)"
         if [[ "$is_primary" == "false" ]]; then
             ui_menu_gap
             ui_menu_add D "$(t st_s3_remove)" danger
@@ -2478,13 +2619,38 @@ s3_target_menu() {
                 print_message "SUCCESS" "$(t st_retention_s3_ok)"
                 ;;
             9)
-                test_s3_connection "$s3_num"
+                echo -e "   ${LIGHT_GRAY}$(t st_s3_limit_hint)${RESET}"
+                local cur_limit
+                cur_limit=$(_s3_var LIMIT_GB "$s3_num")
+                [[ "$cur_limit" =~ ^[0-9]+$ && "$cur_limit" -gt 0 ]] || cur_limit="$(t st_s3_limit_none)"
+                ui_input new_val "$(printf "$(t st_s3_limit_enter)" "$cur_limit")" "100"
+                if [[ -z "$new_val" ]]; then
+                    :
+                elif [[ "$new_val" =~ ^[0-9]+$ ]]; then
+                    if [[ "$new_val" -eq 0 ]]; then
+                        _s3_set LIMIT_GB "$s3_num" ""
+                    else
+                        _s3_set LIMIT_GB "$s3_num" "$new_val"
+                    fi
+                    save_config
+                    print_message "SUCCESS" "$(t st_s3_limit_ok)"
+                else
+                    print_message "ERROR" "$(t st_s3_limit_bad)"
+                fi
+                ;;
+            10)
+                if test_s3_connection "$s3_num"; then
+                    local measured
+                    if measured=$(_s3_measure_usage "$s3_num"); then
+                        print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$measured" "$(_s3_limit_bytes "$s3_num")")${RESET}"
+                    fi
+                fi
                 ;;
             [Dd])
                 if [[ "$is_primary" == "true" ]]; then
                     print_message "ERROR" "$(t invalid_input_select)"
                 else
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t st_s3_remove_confirm) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" rm_confirm
+                    ui_confirm rm_confirm "$(t st_s3_remove_confirm)"
                     echo ""
                     if [[ "$rm_confirm" =~ ^[Yy]$ ]]; then
                         _s3_shift_down "$s3_num"
@@ -2655,7 +2821,7 @@ configure_encryption() {
                 if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
                     print_message "WARN" "$(t enc_disable_warn)"
                     local enc_confirm
-                    read -rp "${GREEN}[?]${RESET} $(t enc_disable_confirm)" enc_confirm
+                    ui_confirm enc_confirm "$(t enc_disable_confirm)"
                     if [[ "$enc_confirm" =~ ^[YyДд]$ ]]; then
                         ENCRYPT_ENABLED="false"
                         save_config
@@ -2679,7 +2845,7 @@ offer_enable_encryption_after_restore() {
     echo ""
     print_message "INFO" "$(t enc_offer_info)"
     local offer_ok
-    read -rp "${GREEN}[?]${RESET} $(t enc_offer_confirm)" offer_ok
+    ui_confirm offer_ok "$(t enc_offer_confirm)"
     if [[ "$offer_ok" =~ ^[YyДд]$ ]]; then
         ENCRYPT_PUBLIC_KEY="$RESTORE_AGE_PUBLIC"
         ENCRYPT_ENABLED="true"
@@ -2739,7 +2905,7 @@ _encryption_generate_keys() {
     fi
     print_message "WARN" "$(t enc_new_keys_warn)"
     local enc_ok
-    read -rp "${GREEN}[?]${RESET} $(t enc_continue_confirm)" enc_ok
+    ui_confirm enc_ok "$(t enc_continue_confirm)"
     [[ "$enc_ok" =~ ^[YyДд]$ ]] || return
 
     local priv pub
@@ -2996,7 +3162,7 @@ METAEOF
                 print_message "ERROR" "$(printf "$(t bk_tg_big)" "$backup_size")"
                 print_message "INFO" "$(t bk_saved_local) ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}"
                 send_telegram_message "⚠️ $(printf "$(t bk_tg_big_notify)" "$backup_size")" "None" 2>/dev/null
-            elif send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text" "$(donate_keyboard)"; then
+            elif caption_text+="$(_usage_tg_lines)"; send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text" "$(donate_keyboard)"; then
                 print_message "SUCCESS" "$(t bk_tg_ok)"
             else
                 echo -e "${RED}❌ $(t bk_tg_err)${RESET}"
@@ -3004,7 +3170,7 @@ METAEOF
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
                 print_message "SUCCESS" "$(t bk_gd_ok)"
-                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"📁 *$(t tg_bk_gd)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
+                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"📁 *$(t tg_bk_gd)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}""$(_usage_tg_lines)"
                 
                 if send_telegram_message "$tg_success_message" "MarkdownV2" "$(donate_keyboard)"; then
                     print_message "SUCCESS" "$(t bk_gd_notify_ok)"
@@ -3037,7 +3203,7 @@ METAEOF
 
             if [[ ${#s3_ok_labels[@]} -gt 0 ]]; then
                 print_message "SUCCESS" "$(t bk_s3_ok)"
-                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"☁️ *$(t tg_bk_s3)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
+                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"☁️ *$(t tg_bk_s3)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}""$(_usage_tg_lines)"
 
                 if [[ $(( ${#s3_ok_labels[@]} + ${#s3_fail_labels[@]} )) -gt 1 ]]; then
                     tg_success_message+=$'\n'$'\n'"*$(t bk_s3_targets)*"
@@ -3110,6 +3276,10 @@ METAEOF
             cleanup_s3_old_backups "$s3_ret_num"
         done < <(_s3_configured_nums)
         print_message "SUCCESS" "$(t bk_s3_retention_ok)"
+        local s3_usage_num
+        while IFS= read -r s3_usage_num; do
+            _s3_measure_usage "$s3_usage_num" >/dev/null 2>&1 || true
+        done < <(_s3_configured_nums)
     fi
     
     echo ""
@@ -3843,7 +4013,7 @@ restore_backup() {
             print_message "WARN" "$(t rs_dumpall_ext)"
             print_message "WARN" "$(t rs_dumpall_warn)"
             echo ""
-            read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_continue_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" compat_confirm
+            ui_confirm compat_confirm "$(t rs_continue_q)"
             if [[ ! "$compat_confirm" =~ ^[yY]$ ]]; then
                 print_message "INFO" "$(t rs_cancelled)"
                 rm -rf "$temp_restore_dir"
@@ -3871,7 +4041,7 @@ restore_backup() {
         echo ""
         print_message "INFO" "$(t rs_panel_found)"
         echo ""
-        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_panel_q) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" confirm_panel
+        ui_confirm confirm_panel "$(t rs_panel_q)"
         echo ""
         if [[ ! "$confirm_panel" =~ ^[Yy]$ ]]; then
             scope_cancelled=true
@@ -4130,8 +4300,7 @@ update_script() {
 
     if compare_versions "$VERSION" "$REMOTE_VERSION"; then
         print_message "ACTION" "$(t upd_new_avail) ${BOLD}${REMOTE_VERSION}${RESET}."
-        echo -e -n "$(t upd_confirm) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-        read -r confirm_update
+        ui_confirm confirm_update "$(t upd_confirm)"
         echo ""
 
         if [[ "${confirm_update,,}" != "y" ]]; then
@@ -4201,8 +4370,7 @@ remove_script() {
     echo  " - $(t rm_symlink)"
     echo  " - $(t rm_cron)"
     echo ""
-    echo -e -n "$(t rm_confirm) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-    read -r confirm
+    ui_confirm confirm "$(t rm_confirm)"
     echo ""
     
     if [[ "${confirm,,}" != "y" ]]; then
@@ -4219,8 +4387,7 @@ remove_script() {
 
     local keep_backups="n"
     if [[ -d "$BACKUP_DIR" ]] && compgen -G "$BACKUP_DIR"/* > /dev/null 2>&1; then
-        echo -e -n "$(t rm_keep_backups_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-        read -r keep_backups
+        ui_confirm keep_backups "$(t rm_keep_backups_q)"
         echo ""
         if [[ "${keep_backups,,}" == "y" ]]; then
             local saved_backups_dir="/opt/rw-backup-restore-saved"
@@ -4825,7 +4992,7 @@ configure_settings() {
         
                         if [[ ! -d "$new_custom_remnawave_path" ]]; then
                             print_message "WARN" "$(t st_path_missing) ${BOLD}${new_custom_remnawave_path}${RESET}"
-                            read -rp "$(echo -e "${GREEN}[?]${RESET} $(t st_path_continue) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_new_custom_path
+                            ui_confirm confirm_new_custom_path "$(t st_path_continue)"
                             if [[ "$confirm_new_custom_path" != "y" ]]; then
                                 echo ""
                                 read -rp "$(t press_enter)"
@@ -5112,6 +5279,7 @@ _ui_human_size() {
         split(u, n, " "); i = 1
         while (b >= 1024 && i < 5) { b /= 1024; i++ }
         s = (i == 1) ? sprintf("%d %s", b, n[i]) : sprintf("%.1f %s", b, n[i])
+        sub(/\.0 /, " ", s)
         if (ru) gsub(/\./, ",", s)
         print s
     }'
@@ -5220,6 +5388,24 @@ show_status_card() {
         "$(t sum_upload)" "$up_val"
         "$(t sum_bot)" "$bot_val"
     )
+    local du used total s3_num s3_bytes s3_limit
+    du=$(_disk_usage)
+    if [[ -n "$du" ]]; then
+        read -r used total <<< "$du"
+        rows+=("$(t usage_disk)" "$(_usage_color "$used" "$total")$(_usage_text "$used" "$total")")
+    fi
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        while IFS= read -r s3_num; do
+            s3_bytes=$(_s3_cached_usage "$s3_num")
+            s3_limit=$(_s3_limit_bytes "$s3_num")
+            if [[ -n "$s3_bytes" ]]; then
+                rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")")
+            else
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(t usage_no_data)")
+            fi
+        done < <(_s3_configured_nums)
+    fi
+
     if [[ "$UPDATE_AVAILABLE" == true ]]; then
         rows+=("$(t sum_update)" "${YELLOW}● $(printf "$(t sum_update_avail)" "${UPDATE_REMOTE_VERSION:-?}")")
     fi
