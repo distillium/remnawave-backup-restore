@@ -13,7 +13,13 @@ scheduled, to Telegram or S3, encrypted, with selective restore.
 
 **English** · [Русский](README-RU.md)
 
+<details>
+<summary><b>What the menu looks like</b></summary>
+<br>
+
 <img src="./media/preview.png" alt="Main menu" width="720">
+
+</details>
 
 </div>
 
@@ -109,8 +115,10 @@ Turn it on in **Settings → Encryption**. Backups are encrypted with an [age](h
 <summary><b>Moving to another server</b></summary>
 <br>
 
+<blockquote>
+
 <details>
-  <summary>Panel only: moving to a new server</summary>
+  <summary>◦ Panel only: moving to a new server</summary>
   <br>
 
 1. In Cloudflare, point the panel subdomain to the new IP. If other services move to the new server too, update their subdomains as well.
@@ -128,7 +136,7 @@ Done. All that's left is to install and set up the other services you need (e.g.
 </details>
 
 <details>
-  <summary>Panel + node: moving to a new server</summary>
+  <summary>◦ Panel + node: moving to a new server</summary>
   <br>
 
 1. In Cloudflare, point the subdomains of the panel and the "root" node (the one on the panel server) to the new IP. If other services move to the new server too, update their subdomains as well.
@@ -149,7 +157,7 @@ Done. All that's left is to install and set up the other services you need (e.g.
 </details>
 
 <details>
-  <summary>Panel + node → "Panel only" on the current server</summary>
+  <summary>◦ Panel + node → "Panel only" on the current server</summary>
   <br>
 
 1. Restore the directory and the database.
@@ -166,7 +174,7 @@ Done. All that's left is to install and set up the other services you need (e.g.
 </details>
 
 <details>
-  <summary>Panel + node → "Panel only" on a new server</summary>
+  <summary>◦ Panel + node → "Panel only" on a new server</summary>
   <br>
 
 1. In Cloudflare, point the panel subdomain to the new IP. If other services move to the new server too, update their subdomains as well.
@@ -189,6 +197,8 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 Done. All that's left is to install and set up the other services you need (e.g. kuma, beszel).
 
 </details>
+
+</blockquote>
 
 </details>
 
@@ -223,4 +233,5 @@ Everything lives in `/opt/rw-backup-restore`: settings in `config.env`, backups 
 </p>
 
 Thank you for your support!
+
 </div>

@@ -13,7 +13,13 @@
 
 [English](README.md) · **Русский**
 
+<details>
+<summary><b>Как выглядит меню</b></summary>
+<br>
+
 <img src="./media/preview-ru.png" alt="Главное меню" width="720">
+
+</details>
 
 </div>
 
@@ -109,8 +115,10 @@ curl -o ~/backup-restore.sh https://raw.githubusercontent.com/distillium/remnawa
 <summary><b>Переезд на другой сервер</b></summary>
 <br>
 
+<blockquote>
+
 <details>
-  <summary>Только панель: переход на новый сервер</summary>
+  <summary>◦ Только панель: переход на новый сервер</summary>
   <br>
 
 1. В Cloudflare направьте поддомен панели на новый IP. Если на новый сервер переезжают и другие сервисы, обновите и их поддомены.
@@ -128,7 +136,7 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 </details>
 
 <details>
-  <summary>Панель + нода: переход на новый сервер</summary>
+  <summary>◦ Панель + нода: переход на новый сервер</summary>
   <br>
 
 1. В Cloudflare направьте на новый IP поддомены панели и «корневой» ноды (которая стоит вместе с панелью). Если на новый сервер переезжают и другие сервисы, обновите и их поддомены.
@@ -149,7 +157,7 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 </details>
 
 <details>
-  <summary>Панель + нода → «Только панель» на текущем сервере</summary>
+  <summary>◦ Панель + нода → «Только панель» на текущем сервере</summary>
   <br>
 
 1. Восстановите директорию и БД.
@@ -166,7 +174,7 @@ rm /opt/remnawave/.env-node
 </details>
 
 <details>
-  <summary>Панель + нода → «Только панель» на новом сервере</summary>
+  <summary>◦ Панель + нода → «Только панель» на новом сервере</summary>
   <br>
 
 1. В Cloudflare направьте поддомен панели на новый IP. Если на новый сервер переезжают и другие сервисы, обновите и их поддомены.
@@ -190,6 +198,8 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 
 </details>
 
+</blockquote>
+
 </details>
 
 <details>
@@ -212,32 +222,16 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
 
 ## Поддержать проект
 
-<table>
-  <thead>
-    <tr>
-      <th width="120">Сеть</th>
-      <th width="480">Адрес USDT</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><b>BSC</b></td>
-      <td><code>0x8b91f0c1ad7d03aa2427c342db81e3aee04b12a5</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>TRON</b></td>
-      <td><code>TEB6RzsH15qkguYWCCCeHDTKUEVE2qSEH2</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>TON</b></td>
-      <td><code>UQD2br2gNfuFEfK4uiki78bxFCiPdN7OLYqZ6EHkNtivemQ1</code></td>
-    </tr>
-    <tr>
-      <td align="center"><b>SOL</b></td>
-      <td><code>Hieo9WK2oTcURmkXj1WAccBSRzSDsuLyvs4s5jH7C6kS</code></td>
-    </tr>
-  </tbody>
-</table>
+<p align="center">
+  <a href="https://t.me/tribute/app?startapp=dRNM">
+    <img src="https://img.shields.io/badge/Donate-Telegram%20Mini%20App-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Поддержать через Telegram">
+  </a>
+  &nbsp;
+  <a href="https://web.tribute.tg/d/RNM">
+    <img src="https://img.shields.io/badge/Donate-Tribute%20Web-8A2BE2?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Поддержать через Tribute">
+  </a>
+</p>
 
 Спасибо за вашу поддержку!
+
 </div>
