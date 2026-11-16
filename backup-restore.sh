@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.9"
+VERSION="4.2.10"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -2634,6 +2634,13 @@ s3_target_menu() {
                     fi
                     save_config
                     print_message "SUCCESS" "$(t st_s3_limit_ok)"
+                    ui_spin_start "$(t st_s3_measuring)"
+                    local measured_now
+                    if measured_now=$(_s3_measure_usage "$s3_num"); then
+                        print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$measured_now" "$(_s3_limit_bytes "$s3_num")")${RESET}"
+                    else
+                        print_message "WARN" "$(t st_s3_measure_fail)"
+                    fi
                 else
                     print_message "ERROR" "$(t st_s3_limit_bad)"
                 fi
@@ -5400,6 +5407,8 @@ show_status_card() {
             s3_limit=$(_s3_limit_bytes "$s3_num")
             if [[ -n "$s3_bytes" ]]; then
                 rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")")
+            elif [[ -n "$s3_limit" ]]; then
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(printf "$(t usage_no_data_limit)" "$(_ui_human_size "$s3_limit")")")
             else
                 rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(t usage_no_data)")
             fi
