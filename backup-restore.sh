@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.1"
+VERSION="4.3.0"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -24,10 +24,7 @@ SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR=""
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
 SCRIPT_RUN_PATH="$(realpath "$0")"
-GD_CLIENT_ID=""
-GD_CLIENT_SECRET=""
-GD_REFRESH_TOKEN=""
-GD_FOLDER_ID=""
+
 S3_ENDPOINT=""
 S3_ACCESS_KEY=""
 S3_SECRET_KEY=""
@@ -68,6 +65,7 @@ if [[ -t 0 ]]; then
     RESET=$'\e[0m'
     BOLD=$'\e[1m'
     MUTED_GREEN=$'\e[38;5;71m'
+    UI_SEL_BG=$'\e[48;5;22m\e[97m'
 else
     RED=""
     GREEN=""
@@ -78,6 +76,7 @@ else
     RESET=""
     BOLD=""
     MUTED_GREEN=""
+    UI_SEL_BG=""
 fi
 
 declare -A L
@@ -114,11 +113,12 @@ load_language() {
 select_language_interactive() {
     echo ""
     echo "Select language / Выберите язык:"
-    echo " 1. Русский"
-    echo " 2. English"
     echo ""
+    ui_menu_reset
+    ui_menu_add 1 "Русский"
+    ui_menu_add 2 "English"
     local lang_choice
-    read -rp "[?] " lang_choice
+    ui_menu_choose lang_choice
     case "$lang_choice" in
         2) LANG_CODE="en" ;;
         *) LANG_CODE="ru" ;;
@@ -141,9 +141,357 @@ print_message() {
         *) type="INFO" ;;
     esac
 
+    [[ "$_UI_SPIN_ON" == "1" ]] && ui_spin_stop
+    if [[ -n "$UI_LAST_ELAPSED" ]]; then
+        if [[ "$type" == "SUCCESS" && "$UI_LAST_ELAPSED" -ge 2 ]]; then
+            message="${message} ${LIGHT_GRAY}· $(printf "$(t ui_elapsed)" "$UI_LAST_ELAPSED")${RESET}"
+        fi
+        UI_LAST_ELAPSED=""
+    fi
     echo -e "${color_code}[$type]${RESET} $message"
     log_write "$type" "$message"
 }
+
+_ui_interactive() {
+    [[ -t 0 && -t 1 && "${TERM:-dumb}" != "dumb" && "${RW_PLAIN_UI:-0}" != "1" ]]
+}
+
+_UI_MENU_KEYS=()
+_UI_MENU_LABELS=()
+_UI_MENU_STYLES=()
+_UI_MENU_WINDOWED=0
+_UI_MENU_FOOTER=()
+_UI_MENU_TYPED=""
+_UI_MENU_WARN=""
+_UI_MENU_KW=1
+
+ui_menu_reset() {
+    _UI_MENU_KEYS=()
+    _UI_MENU_LABELS=()
+    _UI_MENU_STYLES=()
+    _UI_MENU_FOOTER=()
+}
+
+ui_menu_footer() {
+    _UI_MENU_FOOTER+=("$1")
+}
+
+ui_menu_add() {
+    _UI_MENU_KEYS+=("$1")
+    _UI_MENU_LABELS+=("$2")
+    _UI_MENU_STYLES+=("${3:-}")
+}
+
+ui_menu_gap() {
+    _UI_MENU_KEYS+=("")
+    _UI_MENU_LABELS+=("")
+    _UI_MENU_STYLES+=("gap")
+}
+
+_ui_menu_style() {
+    case "$1" in
+        primary) printf '%s' "${GREEN}${BOLD}" ;;
+        warn)    printf '%s' "$YELLOW" ;;
+        danger)  printf '%s' "$RED" ;;
+        *)       printf '' ;;
+    esac
+}
+
+_ui_menu_draw() {
+    local sel="$1" first="$2" last="$3" final="${4:-0}" total="${#_UI_MENU_KEYS[@]}" i st lines=0 f
+    if (( first > 0 )); then
+        printf '\r\e[2K   %s↑ %s%s\n' "$LIGHT_GRAY" "$(t ui_more_above)" "$RESET"; lines=$((lines + 1))
+    elif (( last < total - 1 || _UI_MENU_WINDOWED )); then
+        printf '\r\e[2K\n'; lines=$((lines + 1))
+    fi
+    for ((i = first; i <= last; i++)); do
+        if [[ "${_UI_MENU_STYLES[$i]}" == "gap" ]]; then
+            printf '\r\e[2K\n'; lines=$((lines + 1)); continue
+        fi
+        st=$(_ui_menu_style "${_UI_MENU_STYLES[$i]}")
+        local num
+        num=$(printf '%*s' "$_UI_MENU_KW" "${_UI_MENU_KEYS[$i]}")
+        if (( i == sel )); then
+            printf '\r\e[2K %s▸%s %s%s %s. %s %s\n' "${GREEN}${BOLD}" "$RESET" "$UI_SEL_BG" "$BOLD" "$num" "${_UI_MENU_LABELS[$i]}" "$RESET"
+        else
+            printf '\r\e[2K   %s %s. %s %s\n' "$st" "$num" "${_UI_MENU_LABELS[$i]}" "$RESET"
+        fi
+        lines=$((lines + 1))
+    done
+    if (( last < total - 1 )); then
+        printf '\r\e[2K   %s↓ %s%s\n' "$LIGHT_GRAY" "$(t ui_more_below)" "$RESET"; lines=$((lines + 1))
+    elif (( _UI_MENU_WINDOWED )); then
+        printf '\r\e[2K\n'; lines=$((lines + 1))
+    fi
+    if (( ! final )); then
+        local hint hint_color="$LIGHT_GRAY"
+        if [[ -n "${_UI_MENU_WARN:-}" ]]; then
+            hint=$(printf "$(t ui_invalid_num)" "$_UI_MENU_WARN")
+            hint_color="$YELLOW"
+        elif [[ -n "${_UI_MENU_TYPED:-}" ]]; then
+            hint=$(printf "$(t ui_typed_num)" "$_UI_MENU_TYPED")
+            hint_color="$GREEN"
+        else
+            hint=$(t ui_menu_hint)
+        fi
+        [[ -z "$hint" || "$hint" == ui_* ]] && hint="↑/↓ · Enter"
+        printf '\r\e[2K\n\r\e[2K   %s%s%s\n' "$hint_color" "$hint" "$RESET"
+        lines=$((lines + 2))
+        for f in "${_UI_MENU_FOOTER[@]}"; do
+            printf '\r\e[2K   %s%s%s\n' "$LIGHT_GRAY" "$f" "$RESET"
+            lines=$((lines + 1))
+        done
+    fi
+    _UI_MENU_DRAWN=$lines
+}
+
+_ui_menu_next() { # index direction -> next selectable index
+    local i="$1" dir="$2" n="${#_UI_MENU_KEYS[@]}" step
+    for ((step = 0; step < n; step++)); do
+        i=$(( (i + dir + n) % n ))
+        [[ "${_UI_MENU_STYLES[$i]}" != "gap" ]] && { echo "$i"; return; }
+    done
+    echo "$1"
+}
+
+_ui_menu_index_of() {
+    local i
+    for ((i = 0; i < ${#_UI_MENU_KEYS[@]}; i++)); do
+        [[ "${_UI_MENU_STYLES[$i]}" != "gap" && "${_UI_MENU_KEYS[$i],,}" == "${1,,}" ]] && { echo "$i"; return 0; }
+    done
+    return 1
+}
+
+_ui_menu_has_prefix() { # is there a longer key starting with $1?
+    local k
+    for k in "${_UI_MENU_KEYS[@]}"; do
+        [[ -n "$k" && "${k,,}" != "${1,,}" && "${k,,}" == "${1,,}"* ]] && return 0
+    done
+    return 1
+}
+
+ui_menu_choose() {
+    local __var="$1" init="${2:-}" n="${#_UI_MENU_KEYS[@]}" sel=0 i key rest
+    _UI_MENU_TYPED=""
+    _UI_MENU_WARN=""
+    ui_spin_stop
+    _UI_MENU_KW=1
+    for i in "${_UI_MENU_KEYS[@]}"; do
+        (( ${#i} > _UI_MENU_KW )) && _UI_MENU_KW=${#i}
+    done
+
+    if ! _ui_interactive; then
+        for ((i = 0; i < n; i++)); do
+            if [[ "${_UI_MENU_STYLES[$i]}" == "gap" ]]; then echo ""; continue; fi
+            echo -e " $(_ui_menu_style "${_UI_MENU_STYLES[$i]}")$(printf '%*s' "$_UI_MENU_KW" "${_UI_MENU_KEYS[$i]}"). ${_UI_MENU_LABELS[$i]}${RESET}"
+        done
+        for i in "${_UI_MENU_FOOTER[@]}"; do echo -e "   ${LIGHT_GRAY}${i}${RESET}"; done
+        echo ""
+        local prompt
+        prompt=$(t select_option)
+        [[ -z "$prompt" || "$prompt" == "select_option" ]] && prompt="> "
+        read -rp "${GREEN}[?]${RESET} ${prompt}" key || key=""
+        printf -v "$__var" '%s' "$key"
+        return 0
+    fi
+
+    if [[ -n "$init" ]] && i=$(_ui_menu_index_of "$init"); then
+        sel=$i
+    elif [[ "${_UI_MENU_STYLES[0]:-}" == "gap" ]]; then
+        sel=$(_ui_menu_next 0 1)
+    fi
+
+    local rows max first last
+    rows=$(tput lines 2>/dev/null || echo 24)
+    max=$(( rows - 10 ))
+    (( max < 5 )) && max=5
+    first=0; last=$(( n - 1 ))
+    _UI_MENU_WINDOWED=0
+    (( n > max )) && _UI_MENU_WINDOWED=1
+
+    printf '\e[?25l'
+    stty -echo 2>/dev/null || true
+    local drawn=0
+    while true; do
+        if (( n > max && sel >= 0 )); then
+            (( sel < first )) && first=$sel
+            (( sel > first + max - 1 )) && first=$(( sel - max + 1 ))
+            last=$(( first + max - 1 ))
+            (( last > n - 1 )) && last=$(( n - 1 ))
+        fi
+        (( drawn > 0 )) && printf '\e[%dA' "$drawn"
+        _ui_menu_draw "$sel" "$first" "$last"
+        drawn=$_UI_MENU_DRAWN
+
+        IFS= read -rsn1 key || key=""
+        case "$key" in
+            $'\e')
+                rest=""
+                IFS= read -rsn2 -t 0.05 rest || true
+                case "$rest" in
+                    '[A'|'OA') if (( sel < 0 )); then sel=$(_ui_menu_next "$n" -1); else sel=$(_ui_menu_next "$sel" -1); fi ;;
+                    '[B'|'OB') if (( sel < 0 )); then sel=$(_ui_menu_next -1 1); else sel=$(_ui_menu_next "$sel" 1); fi ;;
+                    '[H'|'OH') sel=$(_ui_menu_next -1 1) ;;
+                    '[F'|'OF') sel=$(_ui_menu_next "$n" -1) ;;
+                    '')
+                        if i=$(_ui_menu_index_of "0"); then sel=$i; break; fi ;;
+                    *) IFS= read -rsn5 -t 0.02 rest || true ;;
+                esac
+                _UI_MENU_TYPED=""; _UI_MENU_WARN="" ;;
+            k) if (( sel < 0 )); then sel=$(_ui_menu_next "$n" -1); else sel=$(_ui_menu_next "$sel" -1); fi; _UI_MENU_TYPED=""; _UI_MENU_WARN="" ;;
+            j) if (( sel < 0 )); then sel=$(_ui_menu_next -1 1); else sel=$(_ui_menu_next "$sel" 1); fi; _UI_MENU_TYPED=""; _UI_MENU_WARN="" ;;
+            '') (( sel >= 0 )) && break ;;
+            $'\x7f'|$'\b')
+                _UI_MENU_TYPED="${_UI_MENU_TYPED%?}"
+                _UI_MENU_WARN=""
+                if [[ -n "$_UI_MENU_TYPED" ]] && i=$(_ui_menu_index_of "$_UI_MENU_TYPED"); then
+                    sel=$i
+                fi ;;
+            *)
+                _UI_MENU_WARN=""
+                local cand="${_UI_MENU_TYPED}${key}"
+                if i=$(_ui_menu_index_of "$cand"); then
+                    _UI_MENU_TYPED="$cand"
+                    sel=$i
+                elif _ui_menu_has_prefix "$cand"; then
+                    _UI_MENU_TYPED="$cand"
+                else
+                    _UI_MENU_WARN="$cand"
+                    _UI_MENU_TYPED=""
+                    sel=-1
+                fi ;;
+        esac
+    done
+    printf '\e[%dA' "$drawn"
+    _ui_menu_draw "$sel" "$first" "$last" 1
+    printf '\e[J'
+    stty echo 2>/dev/null || true
+    printf '\e[?25h'
+    printf -v "$__var" '%s' "${_UI_MENU_KEYS[$sel]}"
+    return 0
+}
+
+ui_input() {
+    local __var="$1" label="$2" hint="${3:-}" note="${4:-}" first="" value=""
+    ui_spin_stop
+    label="${label%: }"; label="${label%:}"
+    if ! _ui_interactive; then
+        read -rp "${label}: " value || value=""
+        printf -v "$__var" '%s' "$value"
+        return 0
+    fi
+    echo -e "   ${BOLD}${label}${RESET}"
+    [[ -n "$note" ]] && echo -e "   ${LIGHT_GRAY}${note}${RESET}"
+    local p=$'\001'"${GREEN}"$'\002''›'$'\001'"${RESET}"$'\002'' '
+    printf '   %s›%s %s%s%s\r' "$GREEN" "$RESET" "$LIGHT_GRAY" "$hint" "$RESET"
+    printf '   %s›%s ' "$GREEN" "$RESET"
+    stty -echo 2>/dev/null || true
+    while true; do
+        IFS= read -rsn1 first || first=""
+        if [[ "$first" == $'\e' ]]; then          # ignore arrows etc. on an empty field
+            IFS= read -rsn5 -t 0.02 first || true
+            continue
+        fi
+        break
+    done
+    if [[ -z "$first" ]]; then
+        stty echo 2>/dev/null || true
+        printf '\e[K\n'
+        printf -v "$__var" '%s' ""
+        return 0
+    fi
+    printf '\r\e[K'
+    stty echo 2>/dev/null || true
+    IFS= read -re -i "$first" -p "   $p" value || value=""
+    printf -v "$__var" '%s' "$value"
+    return 0
+}
+
+ui_secret() {
+    local __var="$1" label="$2" note="${3:-}" value=""
+    ui_spin_stop
+    label="${label%: }"; label="${label%:}"
+    if ! _ui_interactive; then
+        read -rsp "${label}: " value || value=""
+        echo ""
+        printf -v "$__var" '%s' "$value"
+        return 0
+    fi
+    echo -e "   ${BOLD}${label}${RESET}"
+    [[ -n "$note" ]] && echo -e "   ${LIGHT_GRAY}${note}${RESET}"
+    printf '   %s›%s ' "$GREEN" "$RESET"
+    IFS= read -rs value || value=""
+    if [[ -n "$value" ]]; then
+        printf '%s••••••••%s\n' "$LIGHT_GRAY" "$RESET"
+    else
+        printf '\n'
+    fi
+    printf -v "$__var" '%s' "$value"
+    return 0
+}
+
+ui_confirm() {
+    local __var="$1" q="${2:-}" ans
+    ui_spin_stop
+    while true; do
+        if ! read -rp "$(echo -e "${GREEN}[?]${RESET} ${q:+$q }(${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}): ")" ans; then
+            echo ""
+            printf -v "$__var" '%s' "n"
+            return 0
+        fi
+        case "${ans,,}" in
+            y) printf -v "$__var" '%s' "y"; return 0 ;;
+            n) printf -v "$__var" '%s' "n"; return 0 ;;
+        esac
+        if [[ -n "$(LC_ALL=C tr -d '\000-\177' <<< "$ans")" ]]; then
+            echo -e "    ${YELLOW}$(t ui_yn_layout)${RESET}"
+        else
+            echo -e "    ${YELLOW}$(t ui_yn_invalid)${RESET}"
+        fi
+    done
+}
+
+_UI_SPIN_PID=""
+_UI_SPIN_T0=0
+_UI_SPIN_ON=0
+UI_LAST_ELAPSED=""
+
+ui_spin_start() {
+    local msg="$1"
+    ui_spin_stop
+    _UI_SPIN_T0=$SECONDS
+    _UI_SPIN_ON=1
+    log_write "INFO" "$msg"
+    if ! _ui_interactive; then
+        echo -e "${GRAY}[INFO]${RESET} $msg"
+        return 0
+    fi
+    (
+        local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏) i=0 t0=$SECONDS fmt
+        fmt=$(t ui_elapsed)
+        while true; do
+            printf "\r\e[2K%s%s%s %s %s${fmt}%s" "$CYAN" "${frames[i]}" "$RESET" "$msg" "$LIGHT_GRAY" $((SECONDS - t0)) "$RESET"
+            i=$(( (i + 1) % 10 ))
+            sleep 0.1
+        done
+    ) &
+    _UI_SPIN_PID=$!
+    printf '\e[?25l'
+}
+
+ui_spin_stop() {
+    if [[ -n "$_UI_SPIN_PID" ]]; then
+        kill "$_UI_SPIN_PID" 2>/dev/null || true
+        wait "$_UI_SPIN_PID" 2>/dev/null || true
+        _UI_SPIN_PID=""
+        printf '\r\e[2K\e[?25h'
+    fi
+    if [[ "$_UI_SPIN_ON" == "1" ]]; then
+        UI_LAST_ELAPSED=$(( SECONDS - _UI_SPIN_T0 ))
+        _UI_SPIN_ON=0
+    fi
+}
+trap 'ui_spin_stop; if [[ -t 0 ]]; then stty echo 2>/dev/null; printf "\e[?25h"; fi' EXIT
 
 _LOG_ROTATED=false
 _log_rotate() {
@@ -203,162 +551,6 @@ setup_symlink() {
     fi
     echo ""
     return 0
-}
-
-configure_bot_backup() {
-    while true; do
-        clear
-        echo -e "${GREEN}${BOLD}$(t bot_cfg_title)${RESET}"
-        echo ""
-        
-        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            local bot_mode_disp
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                bot_mode_disp="${RED}$(t bot_mode_only)"
-            else
-                bot_mode_disp="${GREEN}$(t bot_mode_panel_bot)"
-            fi
-            print_aligned_rows \
-                "$(t bot_label)" "${GREEN}${BOT_BACKUP_SELECTED}" \
-                "$(t bot_path_label)" "$BOT_BACKUP_PATH" \
-                "$(t bot_mode_label)" "$bot_mode_disp"
-        else
-            print_message "INFO" "$(t bot_backup_status) ${RED}${BOLD}$(t bot_disabled)${RESET}"
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                print_message "WARN" "$(t bot_warn_nothing)"
-            else
-                print_message "INFO" "$(t bot_panel_only_mode)"
-            fi
-        fi
-        echo ""
-        
-        echo " 1. $(t bot_menu_configure)"
-        
-        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            echo " 2. $(t bot_menu_disable)"
-            
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                if [[ "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    echo " 3. $(t bot_menu_enable_panel)"
-                fi
-            else
-                echo " 3. $(t bot_menu_exclude_panel)"
-            fi
-        fi
-
-        echo ""
-        echo " 0. $(t back_to_menu)"
-        echo ""
-        
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" choice
-        
-        case $choice in
-            1)
-                clear
-                echo -e "${GREEN}${BOLD}$(t bot_select_title)${RESET}"
-                echo ""
-                echo " 1. $(t bot_jesus)"
-                echo " 2. $(t bot_jesus_priv)"
-                echo " 3. $(t bot_machka)"
-                echo " 4. $(t bot_snoups)"
-                echo " 5. $(t bot_minishop)"
-                echo " 0. $(t back)"
-                echo ""
-                
-                local bot_choice
-                read -rp "${GREEN}[?]${RESET} $(t your_choice)" bot_choice
-                case "$bot_choice" in
-                    1) BOT_BACKUP_SELECTED="Бот от Иисуса"; bot_folder="remnawave-telegram-shop" ;;
-                    2) BOT_BACKUP_SELECTED="Приватный бот от Иисуса"; bot_folder="rwp-shop" ;;
-                    3) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
-                    4) BOT_BACKUP_SELECTED="Бот от Snoups"; bot_folder="remnashop" ;;
-                    5) BOT_BACKUP_SELECTED="Бот Minishop"; bot_folder="remnawave-minishop" ;;
-                    0) continue ;;
-                    *) print_message "ERROR" "$(t invalid_input)"; sleep 1; continue ;;
-                esac
-                
-                echo ""
-                print_message "ACTION" "$(t bot_select_path)"
-                echo " 1. /opt/$bot_folder"
-                echo " 2. /root/$bot_folder"
-                echo " 3. /opt/stacks/$bot_folder"
-                echo " 4. $(t custom_path)"
-                echo ""
-                
-                local path_choice
-                read -rp "${GREEN}[?]${RESET} $(t select_option)" path_choice
-                case "$path_choice" in
-                    1) BOT_BACKUP_PATH="/opt/$bot_folder" ;;
-                    2) BOT_BACKUP_PATH="/root/$bot_folder" ;;
-                    3) BOT_BACKUP_PATH="/opt/stacks/$bot_folder" ;;
-                    4) 
-                        echo ""
-                        read -rp "   $(t bot_enter_path)" custom_bot_path
-                        if [[ -z "$custom_bot_path" || ! "$custom_bot_path" = /* ]]; then
-                            print_message "ERROR" "$(t bot_path_absolute)"
-                            sleep 2; continue
-                        fi
-                        BOT_BACKUP_PATH="${custom_bot_path%/}" 
-                        ;;
-                    *) print_message "ERROR" "$(t invalid_input)"; sleep 1; continue ;;
-                esac
-
-                echo ""
-                read -rp "$(echo -e "${GREEN}[?]${RESET} $(t bot_db_user)")" bot_db_user
-                BOT_BACKUP_DB_USER="${bot_db_user:-postgres}"
-
-                if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
-                    echo ""
-                    print_message "ACTION" "$(t bot_disable_panel)"
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} (${GREEN}y${RESET}/${RED}n${RESET}): ")" only_bot_confirm
-                    if [[ "$only_bot_confirm" =~ ^[yY]$ ]]; then
-                        SKIP_PANEL_BACKUP="true"
-                    fi
-                fi
-
-                BOT_BACKUP_ENABLED="true"
-                save_config
-                print_message "SUCCESS" "$(t bot_saved)"
-                read -rp "$(t press_enter)"
-                ;;
-
-            2)
-                BOT_BACKUP_ENABLED="false"
-                BOT_BACKUP_PATH=""
-                BOT_BACKUP_SELECTED=""
-                
-                echo ""
-                print_message "SUCCESS" "$(t bot_turned_off)"
-
-                if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    print_message "WARN" "$(t bot_panel_also_off)"
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t bot_enable_panel_back) (y/n): ")" restore_p
-                    if [[ "$restore_p" =~ ^[yY]$ ]]; then
-                        SKIP_PANEL_BACKUP="false"
-                        print_message "SUCCESS" "$(t bot_panel_restored)"
-                    fi
-                fi
-                
-                save_config
-                read -rp "$(t press_enter)"
-                ;;
-
-            3)
-                if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                    SKIP_PANEL_BACKUP="false"
-                    print_message "SUCCESS" "$(t bot_mode_to_panel_bot)"
-                else
-                    SKIP_PANEL_BACKUP="true"
-                    print_message "SUCCESS" "$(t bot_mode_to_only_bot)"
-                fi
-                save_config
-                read -rp "$(t press_enter)"
-                ;;
-
-            0) break ;;
-            *) print_message "ERROR" "$(t invalid_input)" ; sleep 1 ;;
-        esac
-    done
 }
 
 get_bot_params() {
@@ -469,7 +661,7 @@ _wait_container_healthy() {
 check_docker_installed() {
     if ! command -v docker &> /dev/null; then
         print_message "ERROR" "$(t docker_missing)"
-        read -rp "${GREEN}[?]${RESET} $(t docker_install_q) (${GREEN}y${RESET}/${RED}n${RESET}): " install_choice
+        ui_confirm install_choice "$(t docker_install_q)"
         
         if [[ "$install_choice" =~ ^[Yy]$ ]]; then
             print_message "INFO" "$(t docker_installing)"
@@ -511,7 +703,7 @@ create_bot_backup() {
         return 0
     fi
     
-    print_message "INFO" "$(t cbot_dumping)"
+    ui_spin_start "$(t cbot_dumping)"
     if ! docker exec "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
         print_message "ERROR" "$(t cbot_dump_err)"
         return 0
@@ -529,7 +721,7 @@ create_bot_backup() {
             local AI_DB_USER AI_DB_NAME
             read -r AI_DB_USER AI_DB_NAME <<< "$(_container_pg_identity "$AI_CONTAINER")"
             local BOT_AI_DUMP_FILE="bot_assistant_dump_${TIMESTAMP}.sql.gz"
-            print_message "INFO" "$(t cbot_ai_dumping)"
+            ui_spin_start "$(t cbot_ai_dumping)"
             if ( set -o pipefail; docker exec "$AI_CONTAINER" pg_dump -c --if-exists -U "$AI_DB_USER" -d "$AI_DB_NAME" | gzip -9 > "$BACKUP_DIR/$BOT_AI_DUMP_FILE" ); then
                 BACKUP_ITEMS+=("$BOT_AI_DUMP_FILE")
                 print_message "SUCCESS" "$(t cbot_ai_dumped)"
@@ -541,7 +733,7 @@ create_bot_backup() {
     fi
     
     if [ -d "$BOT_BACKUP_PATH" ]; then
-        print_message "INFO" "$(t cbot_archiving) ${BOLD}${BOT_BACKUP_PATH}${RESET}..."
+        ui_spin_start "$(t cbot_archiving) ${BOLD}${BOT_BACKUP_PATH}${RESET}..."
         local exclude_args=""
         for pattern in $BACKUP_EXCLUDE_PATTERNS; do
             exclude_args+="--exclude=$pattern "
@@ -583,7 +775,7 @@ restore_bot_backup() {
     clear
     print_message "INFO" "$(t rbot_found)"
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_restore_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" restore_bot_confirm
+    ui_confirm restore_bot_confirm "$(t rbot_restore_q)"
     
     if [[ ! "$restore_bot_confirm" =~ ^[yY]$ ]]; then
         print_message "INFO" "$(t rbot_cancelled)"
@@ -592,18 +784,21 @@ restore_bot_backup() {
 
     echo ""
     print_message "ACTION" "$(t rbot_which)"
-    echo " 1. $(t bot_jesus)"
-    echo " 2. $(t bot_jesus_priv)"
-    echo " 3. $(t bot_machka)"
-    echo " 4. $(t bot_snoups)"
-    echo " 5. $(t bot_minishop)"
-    echo ""
-    
+    ui_menu_reset
+    ui_menu_add 1 "$(t bot_jesus)"
+    ui_menu_add 2 "$(t bot_jesus_priv)"
+    ui_menu_add 3 "$(t bot_machka)"
+    ui_menu_add 4 "$(t bot_snoups)"
+    ui_menu_add 5 "$(t bot_minishop)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+
     local bot_choice
     local selected_bot_name
     while true; do
-        read -rp "${GREEN}[?]${RESET} $(t rbot_select)" bot_choice
+        ui_menu_choose bot_choice
         case "$bot_choice" in
+            0) print_message "INFO" "$(t rbot_cancelled)"; return 1 ;;
             1) selected_bot_name="Бот от Иисуса"; break ;;
             2) selected_bot_name="Приватный бот от Иисуса"; break ;;
             3) selected_bot_name="Бот от Мачки"; break ;;
@@ -638,13 +833,13 @@ restore_bot_backup() {
         [[ -n "$AI_DUMP_FILE" ]]    && { scope_keys+=("ai");    scope_labels+=("$(t rs_scope_ai)"); }
         [[ -n "$BOT_DIR_ARCHIVE" ]] && { scope_keys+=("files"); scope_labels+=("$(t rs_scope_files)"); }
         local scope_i
+        ui_menu_reset
         for scope_i in "${!scope_keys[@]}"; do
-            echo " $((scope_i + 1)). ${scope_labels[$scope_i]}"
+            ui_menu_add "$((scope_i + 1))" "${scope_labels[$scope_i]}"
         done
-        echo " 0. $(t back)"
-        echo ""
+        ui_menu_add 0 "$(t back)"
         local bot_scope_choice
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" bot_scope_choice
+        ui_menu_choose bot_scope_choice
         echo ""
         if [[ "$bot_scope_choice" == "0" ]]; then
             print_message "INFO" "$(t rbot_cancelled)"; return 1
@@ -668,7 +863,7 @@ restore_bot_backup() {
     print_message "WARN" "${YELLOW}$(t rbot_warn_stop)${RESET}"
     print_message "WARN" "$(t rbot_warn_conflict)"
     echo ""
-    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rbot_continue_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" stop_confirm
+    ui_confirm stop_confirm "$(t rbot_continue_q)"
     
     if [[ ! "$stop_confirm" =~ ^[yY]$ ]]; then
         print_message "INFO" "$(t rbot_stop_first)"
@@ -681,18 +876,18 @@ restore_bot_backup() {
     local _bot_dir_name
     IFS='|' read -r _ _ _bot_dir_name _ <<< "$_bot_params_tmp"
     
-    echo " 1. /opt/$_bot_dir_name"
-    echo " 2. /root/$_bot_dir_name"
-    echo " 3. /opt/stacks/$_bot_dir_name"
-    echo " 4. $(t custom_path)"
-    echo ""
-    echo " 0. $(t back)"
-    echo ""
+    ui_menu_reset
+    ui_menu_add 1 "/opt/$_bot_dir_name"
+    ui_menu_add 2 "/root/$_bot_dir_name"
+    ui_menu_add 3 "/opt/stacks/$_bot_dir_name"
+    ui_menu_add 4 "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
 
     local restore_path
     local path_choice
     while true; do
-        read -rp "${GREEN}[?]${RESET} $(t path_prompt)" path_choice
+        ui_menu_choose path_choice
         case "$path_choice" in
         1) restore_path="/opt/$_bot_dir_name"; break ;;
         2) restore_path="/root/$_bot_dir_name"; break ;;
@@ -700,8 +895,7 @@ restore_bot_backup() {
         4)
             echo ""
             print_message "INFO" "$(t rbot_enter_path)"
-            read -rp "   $(t path_prompt)" custom_restore_path
-        
+            ui_input custom_restore_path "$(t path_prompt)" "/opt/remnawave"
             if [[ -z "$custom_restore_path" ]]; then
                 print_message "ERROR" "$(t rbot_path_empty)"
                 echo ""
@@ -878,7 +1072,7 @@ restore_bot_backup() {
         print_message "SUCCESS" "$(t rbot_db_ready)"
     
         if [[ -n "$BOT_DUMP_FILE" ]]; then
-            print_message "INFO" "$(t rbot_restore_db)"
+            ui_spin_start "$(t rbot_restore_db)"
             local BOT_DUMP_UNCOMPRESSED="${BOT_DUMP_FILE%.gz}"
         
             if ! gunzip "$BOT_DUMP_FILE"; then
@@ -985,10 +1179,7 @@ BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
 DB_USER="$DB_USER"
 UPLOAD_METHOD="$UPLOAD_METHOD"
-GD_CLIENT_ID="$GD_CLIENT_ID"
-GD_CLIENT_SECRET="$GD_CLIENT_SECRET"
-GD_REFRESH_TOKEN="$GD_REFRESH_TOKEN"
-GD_FOLDER_ID="$GD_FOLDER_ID"
+
 S3_ENDPOINT="$S3_ENDPOINT"
 S3_ACCESS_KEY="$S3_ACCESS_KEY"
 S3_SECRET_KEY="$S3_SECRET_KEY"
@@ -996,6 +1187,7 @@ S3_BUCKET="$S3_BUCKET"
 S3_REGION="$S3_REGION"
 S3_PREFIX="$S3_PREFIX"
 S3_RETAIN_DAYS="$S3_RETAIN_DAYS"
+S3_LIMIT_GB="$S3_LIMIT_GB"
 S3_NAME="$S3_NAME"
 S3_COUNT="${S3_COUNT:-1}"
 S3_2_NAME="$S3_2_NAME"
@@ -1006,6 +1198,7 @@ S3_2_BUCKET="$S3_2_BUCKET"
 S3_2_REGION="$S3_2_REGION"
 S3_2_PREFIX="$S3_2_PREFIX"
 S3_2_RETAIN_DAYS="$S3_2_RETAIN_DAYS"
+S3_2_LIMIT_GB="$S3_2_LIMIT_GB"
 S3_3_NAME="$S3_3_NAME"
 S3_3_ENDPOINT="$S3_3_ENDPOINT"
 S3_3_ACCESS_KEY="$S3_3_ACCESS_KEY"
@@ -1014,6 +1207,7 @@ S3_3_BUCKET="$S3_3_BUCKET"
 S3_3_REGION="$S3_3_REGION"
 S3_3_PREFIX="$S3_3_PREFIX"
 S3_3_RETAIN_DAYS="$S3_3_RETAIN_DAYS"
+S3_3_LIMIT_GB="$S3_3_LIMIT_GB"
 S3_4_NAME="$S3_4_NAME"
 S3_4_ENDPOINT="$S3_4_ENDPOINT"
 S3_4_ACCESS_KEY="$S3_4_ACCESS_KEY"
@@ -1022,6 +1216,7 @@ S3_4_BUCKET="$S3_4_BUCKET"
 S3_4_REGION="$S3_4_REGION"
 S3_4_PREFIX="$S3_4_PREFIX"
 S3_4_RETAIN_DAYS="$S3_4_RETAIN_DAYS"
+S3_4_LIMIT_GB="$S3_4_LIMIT_GB"
 S3_5_NAME="$S3_5_NAME"
 S3_5_ENDPOINT="$S3_5_ENDPOINT"
 S3_5_ACCESS_KEY="$S3_5_ACCESS_KEY"
@@ -1030,6 +1225,7 @@ S3_5_BUCKET="$S3_5_BUCKET"
 S3_5_REGION="$S3_5_REGION"
 S3_5_PREFIX="$S3_5_PREFIX"
 S3_5_RETAIN_DAYS="$S3_5_RETAIN_DAYS"
+S3_5_LIMIT_GB="$S3_5_LIMIT_GB"
 RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 RETAIN_BACKUPS_VALUE="${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}"
 RETAIN_BACKUPS_UNIT="${RETAIN_BACKUPS_UNIT:-days}"
@@ -1085,6 +1281,7 @@ load_or_create_config() {
         S3_REGION=${S3_REGION:-}
         S3_PREFIX=${S3_PREFIX:-}
         S3_RETAIN_DAYS=${S3_RETAIN_DAYS:-30}
+        S3_LIMIT_GB=${S3_LIMIT_GB:-}
         S3_NAME=${S3_NAME:-}
         S3_COUNT=${S3_COUNT:-1}
         [[ "$S3_COUNT" -lt 1 ]] && S3_COUNT=1
@@ -1097,6 +1294,7 @@ load_or_create_config() {
         S3_2_REGION=${S3_2_REGION:-}
         S3_2_PREFIX=${S3_2_PREFIX:-}
         S3_2_RETAIN_DAYS=${S3_2_RETAIN_DAYS:-30}
+        S3_2_LIMIT_GB=${S3_2_LIMIT_GB:-}
         S3_3_NAME=${S3_3_NAME:-}
         S3_3_ENDPOINT=${S3_3_ENDPOINT:-}
         S3_3_ACCESS_KEY=${S3_3_ACCESS_KEY:-}
@@ -1105,6 +1303,7 @@ load_or_create_config() {
         S3_3_REGION=${S3_3_REGION:-}
         S3_3_PREFIX=${S3_3_PREFIX:-}
         S3_3_RETAIN_DAYS=${S3_3_RETAIN_DAYS:-30}
+        S3_3_LIMIT_GB=${S3_3_LIMIT_GB:-}
         S3_4_NAME=${S3_4_NAME:-}
         S3_4_ENDPOINT=${S3_4_ENDPOINT:-}
         S3_4_ACCESS_KEY=${S3_4_ACCESS_KEY:-}
@@ -1113,6 +1312,7 @@ load_or_create_config() {
         S3_4_REGION=${S3_4_REGION:-}
         S3_4_PREFIX=${S3_4_PREFIX:-}
         S3_4_RETAIN_DAYS=${S3_4_RETAIN_DAYS:-30}
+        S3_4_LIMIT_GB=${S3_4_LIMIT_GB:-}
         S3_5_NAME=${S3_5_NAME:-}
         S3_5_ENDPOINT=${S3_5_ENDPOINT:-}
         S3_5_ACCESS_KEY=${S3_5_ACCESS_KEY:-}
@@ -1121,6 +1321,7 @@ load_or_create_config() {
         S3_5_REGION=${S3_5_REGION:-}
         S3_5_PREFIX=${S3_5_PREFIX:-}
         S3_5_RETAIN_DAYS=${S3_5_RETAIN_DAYS:-30}
+        S3_5_LIMIT_GB=${S3_5_LIMIT_GB:-}
         RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         RETAIN_BACKUPS_VALUE=${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}
         RETAIN_BACKUPS_UNIT=${RETAIN_BACKUPS_UNIT:-days}
@@ -1145,7 +1346,7 @@ load_or_create_config() {
 
         if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$DB_USER" ]]; then
             print_message "INFO" "$(t cfg_enter_db_user)"
-            read -rp "   $(t input_prompt)" input_db_user
+            ui_input input_db_user "$(t input_prompt)"
             DB_USER=${input_db_user:-postgres}
             config_updated=true
             echo ""
@@ -1153,15 +1354,15 @@ load_or_create_config() {
         
         if [[ "$SKIP_PANEL_BACKUP" != "true" && -z "$REMNALABS_ROOT_DIR" ]]; then
             print_message "ACTION" "$(t cfg_where_panel)"
-            echo " 1. /opt/remnawave"
-            echo " 2. /root/remnawave"
-            echo " 3. /opt/stacks/remnawave"
-            echo " 4. $(t custom_path)"
-            echo ""
+            ui_menu_reset
+            ui_menu_add 1 "/opt/remnawave"
+            ui_menu_add 2 "/root/remnawave"
+            ui_menu_add 3 "/opt/stacks/remnawave"
+            ui_menu_add 4 "$(t custom_path)"
 
             local remnawave_path_choice
             while true; do
-                read -rp "${GREEN}[?]${RESET} $(t select_variant)" remnawave_path_choice
+                ui_menu_choose remnawave_path_choice
                 case "$remnawave_path_choice" in
                 1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
                 2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
@@ -1169,8 +1370,7 @@ load_or_create_config() {
                 4) 
                     echo ""
                     print_message "INFO" "$(t cfg_enter_panel_path)"
-                    read -rp "   $(t path_prompt)" custom_remnawave_path
-    
+                    ui_input custom_remnawave_path "$(t path_prompt)" "/opt/remnawave"
                     if [[ -z "$custom_remnawave_path" ]]; then
                         print_message "ERROR" "$(t cfg_path_empty)"
                         echo ""
@@ -1189,7 +1389,7 @@ load_or_create_config() {
     
                     if [[ ! -d "$custom_remnawave_path" ]]; then
                         print_message "WARN" "$(t cfg_dir_missing) ${BOLD}${custom_remnawave_path}${RESET}"
-                        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t cfg_continue_path) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_path
+                        ui_confirm confirm_custom_path "$(t cfg_continue_path)"
                         if [[ "$confirm_custom_path" != "y" ]]; then
                             echo ""
                             read -rp "$(t press_enter)"
@@ -1209,12 +1409,10 @@ load_or_create_config() {
         fi
 
         if [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-                print_message "WARN" "$(t cfg_gd_incomplete)"
-                print_message "WARN" "$(t cfg_gd_switch_tg)"
-                UPLOAD_METHOD="telegram"
-                config_updated=true
-            fi
+            print_message "WARN" "$(t cfg_gd_removed)"
+            UPLOAD_METHOD="telegram"
+            config_updated=true
+            ( send_telegram_message "⚠️ $(t cfg_gd_removed_tg)" "None" >/dev/null 2>&1 || true ) &
         fi
 
         if [[ "$UPLOAD_METHOD" == "s3" ]]; then
@@ -1224,56 +1422,6 @@ load_or_create_config() {
                 UPLOAD_METHOD="telegram"
                 config_updated=true
             fi
-        fi
-
-        if [[ "$UPLOAD_METHOD" == "google_drive" && ( -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ) ]]; then
-            print_message "WARN" "$(t cfg_gd_missing)"
-            print_message "ACTION" "$(t cfg_gd_enter)"
-            echo ""
-            echo "$(t cfg_gd_no_tokens)"
-            local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-            print_message "LINK" "$(t cfg_gd_guide) ${CYAN}${guide_url}${RESET}"
-            echo ""
-            [[ -z "$GD_CLIENT_ID" ]] && read -rp "   $(t cfg_enter_gd_id)" GD_CLIENT_ID
-            [[ -z "$GD_CLIENT_SECRET" ]] && read -rp "   $(t cfg_enter_gd_secret)" GD_CLIENT_SECRET
-            clear
-            
-            if [[ -z "$GD_REFRESH_TOKEN" ]]; then
-                print_message "WARN" "$(t cfg_gd_auth_needed)"
-                print_message "INFO" "$(t cfg_gd_open_url)"
-                echo ""
-                local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
-                print_message "INFO" "${CYAN}${auth_url}${RESET}"
-                echo ""
-                read -rp "   $(t cfg_gd_enter_code)" AUTH_CODE
-                
-                print_message "INFO" "$(t cfg_gd_getting)"
-                local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
-                    -d client_id="$GD_CLIENT_ID" \
-                    -d client_secret="$GD_CLIENT_SECRET" \
-                    -d code="$AUTH_CODE" \
-                    -d redirect_uri="urn:ietf:wg:oauth:2.0:oob" \
-                    -d grant_type="authorization_code")
-                
-                GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
-                
-                if [[ -z "$GD_REFRESH_TOKEN" || "$GD_REFRESH_TOKEN" == "null" ]]; then
-                    print_message "ERROR" "$(t cfg_gd_fail)"
-                    print_message "WARN" "$(t cfg_gd_incomplete2)"
-                    UPLOAD_METHOD="telegram"
-                    config_updated=true
-                fi
-            fi
-            echo ""
-            echo "   $(t cfg_gd_folder1)"
-            echo "   $(t cfg_gd_folder2)"
-            echo "   $(t cfg_gd_folder3)"
-            echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-            echo "   $(t cfg_gd_folder4)"
-            echo "   $(t cfg_gd_folder5)"
-            echo ""
-            read -rp "   $(t cfg_enter_gd_folder)" GD_FOLDER_ID
-            config_updated=true
         fi
 
         if $config_updated; then
@@ -1309,10 +1457,10 @@ load_or_create_config() {
             echo ""
 
             print_message "ACTION" "$(t cfg_select_mode)"
-            echo " 1. $(t cfg_mode_full)"
-            echo " 2. $(t cfg_mode_bot)"
-            echo ""
-            read -rp "${GREEN}[?]${RESET} $(t your_choice)" main_mode_choice
+            ui_menu_reset
+            ui_menu_add 1 "$(t cfg_mode_full)"
+            ui_menu_add 2 "$(t cfg_mode_bot)"
+            ui_menu_choose main_mode_choice
             
             if [[ "$main_mode_choice" == "2" ]]; then
                 SKIP_PANEL_BACKUP="true"
@@ -1326,33 +1474,33 @@ load_or_create_config() {
             print_message "INFO" "$(t cfg_create_bot)"
             print_message "INFO" "$(t cfg_tg_skip_hint)"
             print_message "WARN" "$(t cfg_tg_skip_warn)"
-            read -rp "   $(t cfg_enter_token)" BOT_TOKEN
+            ui_input BOT_TOKEN "$(t cfg_enter_token)" "123456789:AAH..."
             echo ""
             print_message "INFO" "$(t cfg_chatid_desc)"
             echo -e "   $(t cfg_chatid_help)"
-            read -rp "   $(t cfg_enter_chatid)" CHAT_ID
+            ui_input CHAT_ID "$(t cfg_enter_chatid)" "-1001234567890"
             echo ""
             print_message "INFO" "$(t cfg_thread_info)"
             echo -e "   $(t cfg_thread_empty)"
-            read -rp "   $(t cfg_enter_thread)" TG_MESSAGE_THREAD_ID
+            ui_input TG_MESSAGE_THREAD_ID "$(t cfg_enter_thread)"
             echo ""
 
             if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
                 print_message "INFO" "$(t cfg_enter_db_user_default)"
-                read -rp "   $(t input_prompt)" input_db_user
+                ui_input input_db_user "$(t input_prompt)"
                 DB_USER=${input_db_user:-postgres}
                 echo ""
 
                 print_message "ACTION" "$(t cfg_where_panel)"
-                echo " 1. /opt/remnawave"
-                echo " 2. /root/remnawave"
-                echo " 3. /opt/stacks/remnawave"
-                echo " 4. $(t custom_path)"
-                echo ""
+                ui_menu_reset
+                ui_menu_add 1 "/opt/remnawave"
+                ui_menu_add 2 "/root/remnawave"
+                ui_menu_add 3 "/opt/stacks/remnawave"
+                ui_menu_add 4 "$(t custom_path)"
 
                 local remnawave_path_choice
                 while true; do
-                    read -rp "${GREEN}[?]${RESET} $(t select_variant)" remnawave_path_choice
+                    ui_menu_choose remnawave_path_choice
                     case "$remnawave_path_choice" in
                     1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
                     2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
@@ -1360,7 +1508,7 @@ load_or_create_config() {
                     4) 
                         echo ""
                         print_message "INFO" "$(t cfg_enter_panel_path)"
-                        read -rp "   $(t path_prompt)" custom_remnawave_path
+                        ui_input custom_remnawave_path "$(t path_prompt)" "/opt/remnawave"
                         if [[ -n "$custom_remnawave_path" ]]; then
                             REMNALABS_ROOT_DIR="${custom_remnawave_path%/}"
                             break
@@ -1369,7 +1517,21 @@ load_or_create_config() {
                     *) print_message "ERROR" "$(t invalid_input)" ;;
                     esac
                 done
+                echo ""
+                local add_bot
+                ui_confirm add_bot "$(t cfg_add_bot)"
+                if [[ "$add_bot" == "y" ]]; then
+                    echo ""
+                    _bot_setup_wizard && BOT_BACKUP_ENABLED="true" || true
+                fi
+            else
+                if _bot_setup_wizard; then
+                    BOT_BACKUP_ENABLED="true"
+                else
+                    print_message "WARN" "$(t cfg_bot_later)"
+                fi
             fi
+            echo ""
 
             mkdir -p "$INSTALL_DIR"
             mkdir -p "$BACKUP_DIR"
@@ -1484,7 +1646,7 @@ create_panel_db_dump() {
                 return 1
             fi
             
-            print_message "INFO" "$(t db_connecting) ${BOLD}${DB_HOST}:${DB_PORT}/${DB_NAME}${RESET}"
+            ui_spin_start "$(t db_connecting) ${BOLD}${DB_HOST}:${DB_PORT}/${DB_NAME}${RESET}"
             
             local pg_dump_error_log=$(mktemp)
             
@@ -1668,72 +1830,6 @@ send_telegram_document() {
     return 1
 }
 
-get_google_access_token() {
-    if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-        print_message "ERROR" "$(t gd_not_set)"
-        return 1
-    fi
-
-    local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
-        -d client_id="$GD_CLIENT_ID" \
-        -d client_secret="$GD_CLIENT_SECRET" \
-        -d refresh_token="$GD_REFRESH_TOKEN" \
-        -d grant_type="refresh_token")
-    
-    local access_token=$(echo "$token_response" | jq -r .access_token 2>/dev/null)
-    local expires_in=$(echo "$token_response" | jq -r .expires_in 2>/dev/null)
-
-    if [[ -z "$access_token" || "$access_token" == "null" ]]; then
-        local error_msg=$(echo "$token_response" | jq -r .error_description 2>/dev/null)
-        print_message "ERROR" "$(t gd_token_err) ${error_msg:-Unknown error}."
-        return 1
-    fi
-    echo "$access_token"
-    return 0
-}
-
-send_google_drive_document() {
-    local file_path="$1"
-    local file_name=$(basename "$file_path")
-    local access_token=$(get_google_access_token)
-
-    if [[ -z "$access_token" ]]; then
-        print_message "ERROR" "$(t gd_upload_err)"
-        return 1
-    fi
-
-    local mime_type="application/gzip"
-    local upload_url="https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
-
-    local metadata_file=$(mktemp)
-    
-    local metadata="{\"name\": \"$file_name\", \"mimeType\": \"$mime_type\""
-    if [[ -n "$GD_FOLDER_ID" ]]; then
-        metadata="${metadata}, \"parents\": [\"$GD_FOLDER_ID\"]"
-    fi
-    metadata="${metadata}}"
-    
-    echo "$metadata" > "$metadata_file"
-
-    local response=$(curl -s -X POST "$upload_url" \
-        -H "Authorization: Bearer $access_token" \
-        -F "metadata=@$metadata_file;type=application/json" \
-        -F "file=@$file_path;type=$mime_type")
-
-    rm -f "$metadata_file"
-
-    local file_id=$(echo "$response" | jq -r .id 2>/dev/null)
-    local error_message=$(echo "$response" | jq -r .error.message 2>/dev/null)
-    local error_code=$(echo "$response" | jq -r .error.code 2>/dev/null)
-
-    if [[ -n "$file_id" && "$file_id" != "null" ]]; then
-        return 0
-    else
-        print_message "ERROR" "$(t gd_upload_err) Code: ${error_code:-Unknown}. ${error_message:-Unknown error}."
-        return 1
-    fi
-}
-
 install_aws_cli() {
     if command -v aws &> /dev/null; then
         return 0
@@ -1820,14 +1916,121 @@ _s3_label() {
     fi
 }
 
-_retention_display() {
-    local value="$1"
-    local unit="$2"
-    if [[ "${value:-0}" -le 0 ]]; then
-        printf '%s' "$(t st_retention_value_disabled)"
-    else
-        printf '%s %s' "$value" "$unit"
+_plural() {
+    local n=$(( 10#$1 % 100 )) m=$(( 10#$1 % 10 ))
+    if [[ "$LANG_CODE" == "en" ]]; then
+        if [[ "$1" == "1" ]]; then echo "$2"; else echo "$4"; fi
+    elif (( n >= 11 && n <= 14 )); then echo "$4"
+    elif (( m == 1 )); then echo "$2"
+    elif (( m >= 2 && m <= 4 )); then echo "$3"
+    else echo "$4"
     fi
+}
+
+_retention_display() {
+    local value="${1:-0}" unit="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
+        printf '%s' "$(t st_retention_value_disabled)"
+    elif [[ "$unit" == "hours" ]]; then
+        printf '%s %s' "$value" "$(_plural "$value" "$(t ret_hours_1)" "$(t ret_hours_2)" "$(t ret_hours_5)")"
+    else
+        printf '%s %s' "$value" "$(_plural "$value" "$(t ret_days_1)" "$(t ret_days_2)" "$(t ret_days_5)")"
+    fi
+}
+
+_retention_short() {
+    if [[ "${1:-0}" -le 0 ]] 2>/dev/null; then
+        t ret_forever
+    elif [[ "$2" == "hours" ]]; then
+        printf "$(t ret_short_hours)" "$1"
+    else
+        printf "$(t ret_short_days)" "$1"
+    fi
+}
+
+_ask_retention() {
+    local _ar_val
+    echo -e "   ${LIGHT_GRAY}$(t st_retention_disable_hint)${RESET}"
+    while true; do
+        ui_input _ar_val "$2" "$3"
+        _ar_val="${_ar_val:-$3}"
+        if [[ "$_ar_val" =~ ^[0-9]+$ ]]; then
+            printf -v "$1" '%s' "$((10#$_ar_val))"
+            return 0
+        fi
+        print_message "ERROR" "$(t ret_bad_number)"
+    done
+}
+
+_retention_set_local() {
+    local unit_choice new_unit new_val unit_word
+    print_message "ACTION" "$(t ret_pick_unit)"
+    ui_menu_reset
+    ui_menu_add 1 "$(t ret_unit_days)"
+    ui_menu_add 2 "$(t ret_unit_hours)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose unit_choice
+    case "$unit_choice" in
+        1) new_unit="days"; unit_word="$(t st_retention_days)" ;;
+        2) new_unit="hours"; unit_word="$(t st_retention_hours)" ;;
+        *) return 1 ;;
+    esac
+    echo ""
+    _ask_retention new_val "$(printf "$(t ret_enter_local)" "$unit_word")" "$RETAIN_BACKUPS_VALUE"
+    RETAIN_BACKUPS_UNIT="$new_unit"
+    RETAIN_BACKUPS_VALUE="$new_val"
+    save_config
+    print_message "SUCCESS" "$(t ret_local_ok) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
+}
+
+_retention_set_s3() {
+    local -a nums=()
+    local n pick target cur new_val i=0
+    while IFS= read -r n; do nums+=("$n"); done < <(_s3_configured_nums)
+    [[ ${#nums[@]} -eq 0 ]] && return 1
+    if [[ ${#nums[@]} -eq 1 ]]; then
+        target="${nums[0]}"
+    else
+        print_message "ACTION" "$(t st_retention_pick_s3)"
+        ui_menu_reset
+        for n in "${nums[@]}"; do
+            i=$((i + 1))
+            ui_menu_add "$i" "$(_s3_label "$n") ${LIGHT_GRAY}· $(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)${RESET}"
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose pick
+        [[ "$pick" =~ ^[0-9]+$ && "$pick" -ge 1 && "$pick" -le ${#nums[@]} ]] || return 1
+        target="${nums[$((pick - 1))]}"
+        echo ""
+    fi
+    cur=$(_s3_var RETAIN_DAYS "$target")
+    _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$target")")" "$cur"
+    _s3_set RETAIN_DAYS "$target" "$new_val"
+    save_config
+    print_message "SUCCESS" "$(_s3_label "$target"): ${BOLD}$(_retention_display "$new_val" days)${RESET}"
+}
+
+_schedule_status() {
+    local sched n
+    if [[ -n "$CRON_TIMES" ]]; then
+        sched="${GREEN}$(printf "$(t sum_schedule_utc)" "$CRON_TIMES")"
+    else
+        sched="${YELLOW}$(t sum_schedule_off)"
+    fi
+    print_aligned_rows "$(t sum_schedule):" "$sched"
+    echo ""
+    echo -e "   ${BOLD}$(t ret_heading)${RESET}"
+    local -a ret_rows=("$(t ret_on_server)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        while IFS= read -r n; do
+            ret_rows+=("$(_s3_label "$n"):" "$(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)")
+        done < <(_s3_configured_nums)
+    else
+        ret_rows+=("Telegram:" "$(t ret_tg_keep)")
+    fi
+    print_aligned_rows "${ret_rows[@]}"
 }
 
 _s3_configured_nums() {
@@ -1840,6 +2043,98 @@ _s3_configured_nums() {
             echo "$i"
         fi
     done
+}
+
+STORAGE_CACHE="$INSTALL_DIR/.storage_usage"
+
+_disk_usage() {
+    local dir="$BACKUP_DIR"
+    [[ -d "$dir" ]] || dir="/"
+    df -B1 --output=used,size "$dir" 2>/dev/null | awk 'NR==2 {print $1, $2}'
+}
+
+_usage_text() {
+    local used="$1" total="${2:-}"
+    if [[ -n "$total" && "$total" -gt 0 ]]; then
+        printf "$(t usage_of)" "$(_ui_human_size "$used")" "$(_ui_human_size "$total")" "$(( used * 100 / total ))"
+    else
+        _ui_human_size "$used"
+    fi
+}
+
+_usage_color() {
+    local used="$1" total="${2:-}" pct
+    if [[ -z "$total" || "$total" -le 0 ]]; then
+        printf '%s' "$BOLD"
+        return 0
+    fi
+    pct=$(( used * 100 / total ))
+    if (( pct >= 90 )); then
+        printf '%s' "${RED}${BOLD}"
+    elif (( pct >= 80 )); then
+        printf '%s' "${YELLOW}${BOLD}"
+    else
+        printf '%s' "$BOLD"
+    fi
+}
+
+_s3_usage_id() {
+    printf '%s|%s|%s' "$(_s3_var ENDPOINT "$1")" "$(_s3_var BUCKET "$1")" "$(_s3_var PREFIX "$1")"
+}
+
+_s3_limit_bytes() {
+    local gb
+    gb=$(_s3_var LIMIT_GB "$1")
+    if [[ "$gb" =~ ^[0-9]+$ && "$gb" -gt 0 ]]; then
+        echo $(( gb * 1024 * 1024 * 1024 ))
+    fi
+    return 0
+}
+
+_s3_measure_usage() {
+    local s3_num="$1" out bytes id endpoint_arg="" prefix
+    command -v aws &>/dev/null || return 1
+    [[ -n "$(_s3_var ENDPOINT "$s3_num")" ]] && endpoint_arg="--endpoint-url $(_s3_var ENDPOINT "$s3_num")"
+    prefix=$(_s3_var PREFIX "$s3_num")
+    out=$(AWS_ACCESS_KEY_ID="$(_s3_var ACCESS_KEY "$s3_num")" \
+          AWS_SECRET_ACCESS_KEY="$(_s3_var SECRET_KEY "$s3_num")" \
+          AWS_DEFAULT_REGION="$(_s3_var REGION "$s3_num")" \
+          aws s3 ls "s3://$(_s3_var BUCKET "$s3_num")/${prefix:+${prefix}/}" --recursive --summarize \
+          $endpoint_arg 2>/dev/null) || return 1
+    bytes=$(awk -F': *' '/Total Size/ {print $2; exit}' <<< "$out")
+    [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+    id=$(_s3_usage_id "$s3_num")
+    if [[ -d "$INSTALL_DIR" ]]; then
+        { grep -vF "${id}|" "$STORAGE_CACHE" 2>/dev/null || true; echo "${id}|${bytes}|$(date +%s)"; } > "${STORAGE_CACHE}.tmp" \
+            && mv "${STORAGE_CACHE}.tmp" "$STORAGE_CACHE"
+        chmod 600 "$STORAGE_CACHE" 2>/dev/null || true
+    fi
+    echo "$bytes"
+}
+
+_s3_cached_usage() {
+    local id
+    id=$(_s3_usage_id "$1")
+    [[ -f "$STORAGE_CACHE" ]] || return 0
+    grep -F "${id}|" "$STORAGE_CACHE" 2>/dev/null | tail -1 | awk -F'|' '{print $4}'
+    return 0
+}
+
+_usage_tg_lines() {
+    local lines="" du used total s3_num bytes
+    du=$(_disk_usage)
+    if [[ -n "$du" ]]; then
+        read -r used total <<< "$du"
+        lines+=$'\n'"• *$(t usage_disk):* $(_usage_text "$used" "$total")"
+    fi
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        while IFS= read -r s3_num; do
+            bytes=$(_s3_measure_usage "$s3_num" 2>/dev/null) || bytes=""
+            [[ -n "$bytes" ]] || continue
+            lines+=$'\n'"• *$(_s3_label "$s3_num"):* $(_usage_text "$bytes" "$(_s3_limit_bytes "$s3_num")")"
+        done < <(_s3_configured_nums)
+    fi
+    printf '%s' "$lines"
 }
 
 send_s3_document() {
@@ -2044,7 +2339,7 @@ test_s3_connection() {
 
 _s3_shift_down() {
     local from_num="$1"
-    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS)
+    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS LIMIT_GB)
     local i field value
     for ((i=from_num; i<S3_COUNT; i++)); do
         for field in "${fields[@]}"; do
@@ -2084,59 +2379,72 @@ s3_target_menu() {
         print_message "INFO" "$(t st_s3_access) ${BOLD}${s3_access:+****${s3_access: -4}}${RESET}"
         print_message "INFO" "$(t st_s3_secret) ${BOLD}${s3_secret:+****}${RESET}"
         print_message "INFO" "$(t st_s3_prefix) ${BOLD}${s3_prefix:-$(t root_folder)}${RESET}"
-        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" "$(t st_retention_days)")${RESET}"
-        echo ""
-        echo " 1. $(t st_s3_change_name)"
-        echo " 2. $(t st_s3_change_endpoint)"
-        echo " 3. $(t st_s3_change_region)"
-        echo " 4. $(t st_s3_change_bucket)"
-        echo " 5. $(t st_s3_change_access)"
-        echo " 6. $(t st_s3_change_secret)"
-        echo " 7. $(t st_s3_change_prefix)"
-        echo " 8. $(t st_retention_change_s3)"
-        echo " 9. $(t st_s3_test)"
-        if [[ "$is_primary" == "false" ]]; then
-            echo " D. $(t st_s3_remove)"
+        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" days)${RESET}"
+        local s3_limit_gb s3_used_cached
+        s3_limit_gb=$(_s3_var LIMIT_GB "$s3_num")
+        if [[ "$s3_limit_gb" =~ ^[0-9]+$ && "$s3_limit_gb" -gt 0 ]]; then
+            print_message "INFO" "$(t st_s3_limit) ${BOLD}${s3_limit_gb} $(t gb_unit)${RESET}"
+        else
+            print_message "INFO" "$(t st_s3_limit) ${BOLD}$(t st_s3_limit_none)${RESET}"
+        fi
+        s3_used_cached=$(_s3_cached_usage "$s3_num")
+        if [[ -n "$s3_used_cached" ]]; then
+            print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$s3_used_cached" "$(_s3_limit_bytes "$s3_num")")${RESET}"
         fi
         echo ""
-        echo " 0. $(t back)"
-        echo ""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" s3t_choice
+        ui_menu_reset
+        ui_menu_add 1 "$(t st_s3_change_name)"
+        ui_menu_add 2 "$(t st_s3_change_endpoint)"
+        ui_menu_add 3 "$(t st_s3_change_region)"
+        ui_menu_add 4 "$(t st_s3_change_bucket)"
+        ui_menu_add 5 "$(t st_s3_change_access)"
+        ui_menu_add 6 "$(t st_s3_change_secret)"
+        ui_menu_add 7 "$(t st_s3_change_prefix)"
+        ui_menu_add 8 "$(t st_retention_change_s3)"
+        ui_menu_add 9 "$(t st_s3_change_limit)"
+        ui_menu_add 10 "$(t st_s3_test)"
+        if [[ "$is_primary" == "false" ]]; then
+            ui_menu_gap
+            ui_menu_add D "$(t st_s3_remove)" danger
+        fi
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose s3t_choice
         echo ""
 
         case "$s3t_choice" in
             1)
-                read -rp "   $(t st_s3_enter_name)" new_val
+                ui_input new_val "$(t st_s3_enter_name)"
                 _s3_set NAME "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_name_ok)"
                 ;;
             2)
-                read -rp "   $(t st_s3_enter_endpoint)" new_val
+                ui_input new_val "$(t st_s3_enter_endpoint)" "https://s3.example.com"
                 _s3_set ENDPOINT "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_endpoint_ok)"
                 ;;
             3)
-                read -rp "   $(t st_s3_enter_region)" new_val
+                ui_input new_val "$(t st_s3_enter_region)"
                 _s3_set REGION "$s3_num" "${new_val:-us-east-1}"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_region_ok)"
                 ;;
             4)
-                read -rp "   $(t st_s3_enter_bucket)" new_val
+                ui_input new_val "$(t st_s3_enter_bucket)" "rw-backups"
                 _s3_set BUCKET "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_bucket_ok)"
                 ;;
             5)
-                read -rp "   $(t st_s3_enter_access)" new_val
+                ui_input new_val "$(t st_s3_enter_access)"
                 _s3_set ACCESS_KEY "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_access_ok)"
                 ;;
             6)
-                read -rp "   $(t st_s3_enter_secret)" new_val
+                ui_input new_val "$(t st_s3_enter_secret)"
                 _s3_set SECRET_KEY "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_secret_ok)"
@@ -2144,26 +2452,57 @@ s3_target_menu() {
             7)
                 echo "   $(t ul_s3_prefix_info1)"
                 echo "   $(t ul_s3_prefix_info2)"
-                read -rp "   $(t st_s3_enter_prefix)" new_val
+                ui_input new_val "$(t st_s3_enter_prefix)" "server-1"
                 _s3_set PREFIX "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_s3_prefix_ok)"
                 ;;
             8)
-                echo "   $(t st_retention_disable_hint)"
-                read -rp "   $(printf "$(t st_retention_enter_s3)" "$s3_retain")" new_val
-                _s3_set RETAIN_DAYS "$s3_num" "${new_val:-$s3_retain}"
+                _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$s3_num")")" "$s3_retain"
+                _s3_set RETAIN_DAYS "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_retention_s3_ok)"
                 ;;
             9)
-                test_s3_connection "$s3_num"
+                echo -e "   ${LIGHT_GRAY}$(t st_s3_limit_hint)${RESET}"
+                local cur_limit
+                cur_limit=$(_s3_var LIMIT_GB "$s3_num")
+                [[ "$cur_limit" =~ ^[0-9]+$ && "$cur_limit" -gt 0 ]] || cur_limit="$(t st_s3_limit_none)"
+                ui_input new_val "$(printf "$(t st_s3_limit_enter)" "$cur_limit")" "100"
+                if [[ -z "$new_val" ]]; then
+                    :
+                elif [[ "$new_val" =~ ^[0-9]+$ ]]; then
+                    if [[ "$new_val" -eq 0 ]]; then
+                        _s3_set LIMIT_GB "$s3_num" ""
+                    else
+                        _s3_set LIMIT_GB "$s3_num" "$new_val"
+                    fi
+                    save_config
+                    print_message "SUCCESS" "$(t st_s3_limit_ok)"
+                    ui_spin_start "$(t st_s3_measuring)"
+                    local measured_now
+                    if measured_now=$(_s3_measure_usage "$s3_num"); then
+                        print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$measured_now" "$(_s3_limit_bytes "$s3_num")")${RESET}"
+                    else
+                        print_message "WARN" "$(t st_s3_measure_fail)"
+                    fi
+                else
+                    print_message "ERROR" "$(t st_s3_limit_bad)"
+                fi
+                ;;
+            10)
+                if test_s3_connection "$s3_num"; then
+                    local measured
+                    if measured=$(_s3_measure_usage "$s3_num"); then
+                        print_message "INFO" "$(t st_s3_used) ${BOLD}$(_usage_text "$measured" "$(_s3_limit_bytes "$s3_num")")${RESET}"
+                    fi
+                fi
                 ;;
             [Dd])
                 if [[ "$is_primary" == "true" ]]; then
                     print_message "ERROR" "$(t invalid_input_select)"
                 else
-                    read -rp "$(echo -e "${GREEN}[?]${RESET} $(t st_s3_remove_confirm) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" rm_confirm
+                    ui_confirm rm_confirm "$(t st_s3_remove_confirm)"
                     echo ""
                     if [[ "$rm_confirm" =~ ^[Yy]$ ]]; then
                         _s3_shift_down "$s3_num"
@@ -2190,19 +2529,19 @@ s3_settings_menu() {
         echo ""
         local idx=0
         local s3_num
+        ui_menu_reset
         while IFS= read -r s3_num; do
             idx=$((idx + 1))
             local lbl=$(_s3_label "$s3_num")
             local bucket=$(_s3_var BUCKET "$s3_num")
-            echo "   ${idx}. ${lbl} — ${bucket:-$(t not_set)}"
+            ui_menu_add "$idx" "${lbl} — ${bucket:-$(t not_set)}"
         done < <(_s3_configured_nums)
-        echo ""
+        ui_menu_gap
         if [[ "${S3_COUNT:-1}" -lt 5 ]]; then
-            echo " A. $(t st_s3_add_new)"
+            ui_menu_add A "$(t st_s3_add_new)" primary
         fi
-        echo " 0. $(t back)"
-        echo ""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" s3m_choice
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose s3m_choice
         echo ""
 
         case "$s3m_choice" in
@@ -2276,8 +2615,7 @@ prompt_age_private_key() {
     AGE_PRIVATE_KEY=""
     local key_input attempts=0
     while (( attempts < 3 )); do
-        read -rsp "${GREEN}[?]${RESET} $(t enc_enter_private)" key_input
-        echo ""
+        ui_secret key_input "$(t enc_enter_private)"
         key_input="${key_input//[[:space:]]/}"
         [[ -z "$key_input" ]] && return 1
         if [[ "$key_input" =~ ^AGE-SECRET-KEY-1[A-Z0-9]+$ ]]; then
@@ -2317,14 +2655,16 @@ configure_encryption() {
         print_message "INFO" "$(t enc_info1)"
         print_message "INFO" "$(t enc_info2)"
         echo ""
-        echo " 1. $(t enc_use_existing)"
-        echo " 2. $(t enc_generate_new)"
-        [[ "$ENCRYPT_ENABLED" == "true" ]] && echo " 3. $(t enc_disable)"
-        echo ""
-        echo " 0. $(t back)"
-        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t enc_use_existing)"
+        ui_menu_add 2 "$(t enc_generate_new)"
+        if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
+            ui_menu_add 3 "$(t enc_disable)" danger
+        fi
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
         local enc_choice
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" enc_choice
+        ui_menu_choose enc_choice
         echo ""
         case "$enc_choice" in
             1) _encryption_use_existing_key ;;
@@ -2333,7 +2673,7 @@ configure_encryption() {
                 if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
                     print_message "WARN" "$(t enc_disable_warn)"
                     local enc_confirm
-                    read -rp "${GREEN}[?]${RESET} $(t enc_disable_confirm)" enc_confirm
+                    ui_confirm enc_confirm "$(t enc_disable_confirm)"
                     if [[ "$enc_confirm" =~ ^[YyДд]$ ]]; then
                         ENCRYPT_ENABLED="false"
                         save_config
@@ -2357,7 +2697,7 @@ offer_enable_encryption_after_restore() {
     echo ""
     print_message "INFO" "$(t enc_offer_info)"
     local offer_ok
-    read -rp "${GREEN}[?]${RESET} $(t enc_offer_confirm)" offer_ok
+    ui_confirm offer_ok "$(t enc_offer_confirm)"
     if [[ "$offer_ok" =~ ^[YyДд]$ ]]; then
         ENCRYPT_PUBLIC_KEY="$RESTORE_AGE_PUBLIC"
         ENCRYPT_ENABLED="true"
@@ -2380,8 +2720,7 @@ _encryption_use_existing_key() {
     echo -e "   ${GRAY}$(t enc_existing_note)${RESET}"
     echo ""
     local key_input pub=""
-    read -rsp "${GREEN}[?]${RESET} $(t enc_enter_existing)" key_input
-    echo ""
+    ui_secret key_input "$(t enc_enter_existing)"
     key_input="${key_input//[[:space:]]/}"
 
     if [[ "$key_input" =~ ^age1[a-z0-9]{58}$ ]]; then
@@ -2418,7 +2757,7 @@ _encryption_generate_keys() {
     fi
     print_message "WARN" "$(t enc_new_keys_warn)"
     local enc_ok
-    read -rp "${GREEN}[?]${RESET} $(t enc_continue_confirm)" enc_ok
+    ui_confirm enc_ok "$(t enc_continue_confirm)"
     [[ "$enc_ok" =~ ^[YyДд]$ ]] || return
 
     local priv pub
@@ -2445,8 +2784,7 @@ _encryption_generate_keys() {
 
     local confirmed=false attempts=0 check
     while (( attempts < 3 )); do
-        read -rsp "${GREEN}[?]${RESET} $(t enc_retype_private)" check
-        echo ""
+        ui_secret check "$(t enc_retype_private)"
         check="${check//[[:space:]]/}"
         if [[ "$check" == "$priv" ]]; then
             confirmed=true
@@ -2477,6 +2815,12 @@ _encryption_generate_keys() {
 create_backup() {
     LOG_CATEGORY="backup"
     log_write "INFO" "=== backup started (v${VERSION}) ==="
+    if [[ "$(_backup_mode)" == "none" ]]; then
+        print_message "ERROR" "$(t bk_nothing)"
+        log_write "ERROR" "nothing to back up: panel and bot are both off"
+        [[ -t 0 ]] || send_telegram_message "❌ $(t bk_nothing)" "None" || true
+        return 1
+    fi
     print_message "INFO" "$(t bk_starting)"
     echo ""
     
@@ -2510,9 +2854,10 @@ create_backup() {
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
         print_message "INFO" "$(t bk_skip_panel)"
     else
-        print_message "INFO" "$(t bk_creating_dump)"
+        ui_spin_start "$(t bk_creating_dump)"
         if ! create_panel_db_dump "$BACKUP_DIR/$BACKUP_FILE_DB"; then
             local STATUS=$?
+            ui_spin_stop
             echo -e "${RED}❌ $(t bk_dump_err) ${BOLD}$STATUS${RESET}. $(t bk_check_db)${RESET}"
             local error_msg="❌ $(t bk_dump_err) ${STATUS}"
             if [[ -n "$LAST_DB_ERROR" ]]; then
@@ -2531,7 +2876,7 @@ create_backup() {
         REMNAWAVE_DIR_ARCHIVE="remnawave_dir_${TIMESTAMP}.tar.gz"
         
         if [ -d "$REMNALABS_ROOT_DIR" ]; then
-            print_message "INFO" "$(t bk_arch_dir) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
+            ui_spin_start "$(t bk_arch_dir) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}..."
             
             local exclude_args=""
             for pattern in $BACKUP_EXCLUDE_PATTERNS; do
@@ -2586,8 +2931,10 @@ BOT_META_VERSION="$META_BOT_VERSION"
 METAEOF
     BACKUP_ITEMS+=("backup_meta.info")
     
+    ui_spin_start "$(t bk_packing)"
     if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}"; then
         STATUS=$?
+        ui_spin_stop
         echo -e "${RED}❌ $(t bk_final_err) ${BOLD}$STATUS${RESET}.${RESET}"
         local error_msg="❌ $(t bk_final_err) ${BOLD}${STATUS}${RESET}"
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
@@ -2597,7 +2944,7 @@ METAEOF
     fi
     
     if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
-        print_message "INFO" "$(t enc_encrypting)"
+        ui_spin_start "$(t enc_encrypting)"
         local enc_fail=false
         if [[ -z "$ENCRYPT_PUBLIC_KEY" ]] || ! install_age; then
             enc_fail=true
@@ -2629,7 +2976,7 @@ METAEOF
     print_message "SUCCESS" "$(t bk_cleaned)"
     echo ""
     
-    print_message "INFO" "$(t bk_sending) (${UPLOAD_METHOD})..."
+    ui_spin_start "$(t bk_sending) (${UPLOAD_METHOD})..."
     
     local DATE=$(date +'%Y-%m-%d %H:%M:%S')
     local backup_size=$(du -h "$BACKUP_DIR/$BACKUP_FILE_FINAL" | awk '{print $1}')
@@ -2673,24 +3020,10 @@ METAEOF
                 print_message "ERROR" "$(printf "$(t bk_tg_big)" "$backup_size")"
                 print_message "INFO" "$(t bk_saved_local) ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}"
                 send_telegram_message "⚠️ $(printf "$(t bk_tg_big_notify)" "$backup_size")" "None" 2>/dev/null
-            elif send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text" "$(donate_keyboard)"; then
+            elif caption_text+="$(_usage_tg_lines)"; send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text" "$(donate_keyboard)"; then
                 print_message "SUCCESS" "$(t bk_tg_ok)"
             else
                 echo -e "${RED}❌ $(t bk_tg_err)${RESET}"
-            fi
-        elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then
-                print_message "SUCCESS" "$(t bk_gd_ok)"
-                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"📁 *$(t tg_bk_gd)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
-                
-                if send_telegram_message "$tg_success_message" "MarkdownV2" "$(donate_keyboard)"; then
-                    print_message "SUCCESS" "$(t bk_gd_notify_ok)"
-                else
-                    print_message "ERROR" "$(t bk_gd_notify_fail)"
-                fi
-            else
-                echo -e "${RED}❌ $(t bk_gd_err)${RESET}"
-                send_telegram_message "❌ $(t bk_gd_err_tg)" "None"
             fi
         elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
             local s3_ok_labels=()
@@ -2704,6 +3037,7 @@ METAEOF
                     continue
                 fi
                 local s3_lbl=$(_s3_label "$s3_num")
+                ui_spin_start "$(t bk_sending) (${s3_lbl})..."
                 if send_s3_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$s3_num"; then
                     s3_ok_labels+=("$s3_lbl")
                 else
@@ -2713,7 +3047,7 @@ METAEOF
 
             if [[ ${#s3_ok_labels[@]} -gt 0 ]]; then
                 print_message "SUCCESS" "$(t bk_s3_ok)"
-                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"☁️ *$(t tg_bk_s3)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
+                local tg_success_message="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"☁️ *$(t tg_bk_s3)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}""$(_usage_tg_lines)"
 
                 if [[ $(( ${#s3_ok_labels[@]} + ${#s3_fail_labels[@]} )) -gt 1 ]]; then
                     tg_success_message+=$'\n'$'\n'"*$(t bk_s3_targets)*"
@@ -2744,8 +3078,7 @@ METAEOF
         local error_msg="❌ $(t bk_file_missing) ${BOLD}${BACKUP_FILE_FINAL}${RESET}"
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
             send_telegram_message "$error_msg" "None"
-        elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
-            print_message "ERROR" "$(t bk_gd_impossible)"
+
         elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
             print_message "ERROR" "$(t bk_s3_impossible)"
         fi
@@ -2757,7 +3090,7 @@ METAEOF
     if [[ "${RETAIN_BACKUPS_VALUE:-0}" -le 0 ]]; then
         print_message "INFO" "$(t bk_retention_disabled)"
     else
-        print_message "INFO" "$(printf "$(t bk_retention)" "$RETAIN_BACKUPS_VALUE")"
+        print_message "INFO" "$(printf "$(t bk_retention)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")"
         if [[ "$RETAIN_BACKUPS_UNIT" == "hours" ]]; then
             find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -mmin +$((RETAIN_BACKUPS_VALUE * 60)) -delete
         else
@@ -2782,10 +3115,14 @@ METAEOF
                 print_message "INFO" "$(t bk_retention_disabled) (${s3_ret_lbl})"
                 continue
             fi
-            print_message "INFO" "$(printf "$(t bk_s3_retention)" "$s3_ret_days") (${s3_ret_lbl})"
+            print_message "INFO" "$(printf "$(t bk_s3_retention)" "$(_retention_display "$s3_ret_days" days)") (${s3_ret_lbl})"
             cleanup_s3_old_backups "$s3_ret_num"
         done < <(_s3_configured_nums)
         print_message "SUCCESS" "$(t bk_s3_retention_ok)"
+        local s3_usage_num
+        while IFS= read -r s3_usage_num; do
+            _s3_measure_usage "$s3_usage_num" >/dev/null 2>&1 || true
+        done < <(_s3_configured_nums)
     fi
     
     echo ""
@@ -2849,17 +3186,19 @@ setup_auto_send() {
         clear
         echo -e "${GREEN}${BOLD}$(t cron_title)${RESET}"
         echo ""
-        if [[ -n "$CRON_TIMES" ]]; then
-            print_message "INFO" "$(t cron_on) ${BOLD}${CRON_TIMES}${RESET} $(t cron_utc)"
-        else
-            print_message "INFO" "$(t cron_off)"
+        _schedule_status
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t cron_enable)"
+        ui_menu_add 2 "$(t cron_disable)"
+        ui_menu_gap
+        ui_menu_add 3 "$(t ret_menu_local)"
+        if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+            ui_menu_add 4 "$(t ret_menu_s3)"
         fi
-        echo ""
-        echo " 1. $(t cron_enable)"
-        echo " 2. $(t cron_disable)"
-        echo " 0. $(t back_to_menu)"
-        echo ""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" choice
+        ui_menu_gap
+        ui_menu_add 0 "$(t back_to_menu)"
+        ui_menu_choose choice
         echo ""
         case $choice in
             1)
@@ -2874,11 +3213,15 @@ setup_auto_send() {
                 fi
 
                 echo "$(t cron_variant)"
-                echo "  1) $(t cron_time)"
-                echo "  2) $(t cron_hourly)"
-                echo "  3) $(t cron_daily)"
-                read -rp "   $(t your_choice)" send_choice
+                ui_menu_reset
+                ui_menu_add 1 "$(t cron_time)"
+                ui_menu_add 2 "$(t cron_hourly)"
+                ui_menu_add 3 "$(t cron_daily)"
+                ui_menu_gap
+                ui_menu_add 0 "$(t back)"
+                ui_menu_choose send_choice
                 echo ""
+                [[ "$send_choice" == "0" ]] && continue
 
                 cron_times_to_write=()
                 user_friendly_times_local=""
@@ -2886,7 +3229,7 @@ setup_auto_send() {
 
                 if [[ "$send_choice" == "1" ]]; then
                     echo "$(t cron_enter_utc)"
-                    read -rp "   $(t cron_time_space)" times
+                    ui_input times "$(t cron_time_space)" "03:00 15:00"
                     IFS=' ' read -ra arr <<< "$times"
 
                     for t_val in "${arr[@]}"; do
@@ -2984,6 +3327,11 @@ setup_auto_send() {
                 CRON_TIMES="${user_friendly_times_local% }"
                 save_config
                 print_message "SUCCESS" "$(t cron_set) ${BOLD}${CRON_TIMES}${RESET} $(t cron_utc)"
+                ;;
+            3) _retention_set_local || continue ;;
+            4)
+                [[ "$UPLOAD_METHOD" == "s3" ]] || continue
+                _retention_set_s3 || continue
                 ;;
             2)
                 print_message "INFO" "$(t cron_disabling)"
@@ -3128,13 +3476,13 @@ restore_backup() {
     local S3_STREAM_RESTORE=false
 
     echo "$(t rs_source_select)"
-    echo " 1. $(t rs_source_local)"
-    echo " 2. $(t rs_source_s3)"
-    echo ""
-    echo " 0. $(t back_to_menu)"
-    echo ""
+    ui_menu_reset
+    ui_menu_add 1 "$(t rs_source_local)"
+    ui_menu_add 2 "$(t rs_source_s3)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back_to_menu)"
     local source_choice
-    read -rp "${GREEN}[?]${RESET} $(t select_option)" source_choice
+    ui_menu_choose source_choice
 
     case "$source_choice" in
         0) return ;;
@@ -3155,17 +3503,17 @@ restore_backup() {
                 echo ""
                 echo "$(t rs_s3_pick_target)"
                 local rs_pick_i=0
+                ui_menu_reset
                 for rs_s3_n in "${rs_s3_nums[@]}"; do
                     rs_pick_i=$((rs_pick_i + 1))
-                    echo " ${rs_pick_i}) $(_s3_label "$rs_s3_n") ($(_s3_var BUCKET "$rs_s3_n"))"
+                    ui_menu_add "$rs_pick_i" "$(_s3_label "$rs_s3_n") ($(_s3_var BUCKET "$rs_s3_n"))"
                 done
-                echo " $((${#rs_s3_nums[@]} + 1))) $(t rs_s3_manual_entry)"
-                echo ""
-                echo " 0) $(t back)"
-                echo ""
+                ui_menu_add "$((${#rs_s3_nums[@]} + 1))" "$(t rs_s3_manual_entry)"
+                ui_menu_gap
+                ui_menu_add 0 "$(t back)"
                 local rs_pick
                 while true; do
-                    read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" rs_pick
+                    ui_menu_choose rs_pick
                     [[ "$rs_pick" == "0" ]] && return
                     if [[ "$rs_pick" =~ ^[0-9]+$ ]] && (( rs_pick >= 1 && rs_pick <= ${#rs_s3_nums[@]} + 1 )); then
                         if (( rs_pick == ${#rs_s3_nums[@]} + 1 )); then
@@ -3182,15 +3530,15 @@ restore_backup() {
             if [[ "$rs_s3_manual" == "true" ]]; then
                 print_message "ACTION" "$(t rs_s3_enter_creds)"
                 echo ""
-                read -rp "   $(t ul_s3_enter_endpoint)" rs_s3_endpoint
-                read -rp "   $(t ul_s3_enter_region)" rs_s3_region
-                read -rp "   $(t ul_s3_enter_bucket)" rs_s3_bucket
-                read -rp "   $(t ul_s3_enter_access)" rs_s3_access
-                read -rp "   $(t ul_s3_enter_secret)" rs_s3_secret
+                ui_input rs_s3_endpoint "$(t ul_s3_enter_endpoint)" "https://s3.example.com"
+                ui_input rs_s3_region "$(t ul_s3_enter_region)"
+                ui_input rs_s3_bucket "$(t ul_s3_enter_bucket)" "rw-backups"
+                ui_input rs_s3_access "$(t ul_s3_enter_access)"
+                ui_input rs_s3_secret "$(t ul_s3_enter_secret)"
                 echo ""
                 echo "   $(t ul_s3_prefix_info1)"
                 echo "   $(t ul_s3_prefix_info2)"
-                read -rp "   $(t ul_s3_enter_prefix)" rs_s3_prefix
+                ui_input rs_s3_prefix "$(t ul_s3_enter_prefix)" "server-1"
                 echo ""
             else
                 rs_s3_endpoint="$(_s3_var ENDPOINT "$rs_s3_num")"
@@ -3263,19 +3611,17 @@ restore_backup() {
             echo ""
             echo "$(t rs_s3_select)"
             local i=1
+            ui_menu_reset
             for idx in "${!s3_files[@]}"; do
-                local human_size
-                human_size=$(numfmt --to=iec-i --suffix=B "${s3_sizes[$idx]}" 2>/dev/null || echo "${s3_sizes[$idx]}B")
-                echo " $i) ${s3_files[$idx]} ($human_size)"
+                ui_menu_add "$i" "${s3_files[$idx]} ${LIGHT_GRAY}($(_ui_human_size "${s3_sizes[$idx]}"))${RESET}"
                 i=$((i+1))
             done
-            echo ""
-            echo " 0) $(t back)"
-            echo ""
+            ui_menu_gap
+            ui_menu_add 0 "$(t back)"
 
             local s3_choice s3_index
             while true; do
-                read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" s3_choice
+                ui_menu_choose s3_choice
                 [[ "$s3_choice" == "0" ]] && return
                 [[ "$s3_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "$(t invalid_input)"; continue; }
                 s3_index=$((s3_choice - 1))
@@ -3314,6 +3660,7 @@ restore_backup() {
                 read -rp "$(t press_enter_back)"
                 return
             fi
+            ui_spin_start "$(t rs_s3_streaming)"
             (set -o pipefail
              AWS_ACCESS_KEY_ID="$S3_RESTORE_ACCESS" \
              AWS_SECRET_ACCESS_KEY="$S3_RESTORE_SECRET" \
@@ -3326,6 +3673,7 @@ restore_backup() {
             AGE_PRIVATE_KEY=""
             [[ "$s3_stream_ok" == "false" ]] && print_message "ERROR" "$(t enc_decrypt_failed)"
         else
+            ui_spin_start "$(t rs_s3_streaming)"
             (set -o pipefail
              AWS_ACCESS_KEY_ID="$S3_RESTORE_ACCESS" \
              AWS_SECRET_ACCESS_KEY="$S3_RESTORE_SECRET" \
@@ -3361,17 +3709,17 @@ restore_backup() {
         echo ""
         echo "$(t rs_select_file)"
         local i=1
+        ui_menu_reset
         for file in "${SORTED_BACKUP_FILES[@]}"; do
-            echo " $i) ${file##*/}"
+            ui_menu_add "$i" "${file##*/} ${LIGHT_GRAY}($(_ui_human_size "$(stat -c %s "$file" 2>/dev/null || echo 0)"))${RESET}"
             i=$((i+1))
         done
-        echo ""
-        echo " 0) $(t back_to_menu)"
-        echo ""
+        ui_menu_gap
+        ui_menu_add 0 "$(t back_to_menu)"
 
         local user_choice selected_index
         while true; do
-            read -rp "${GREEN}[?]${RESET} $(t rs_enter_num)" user_choice
+            ui_menu_choose user_choice
             [[ "$user_choice" == "0" ]] && { rm -rf "$temp_restore_dir"; return; }
             [[ "$user_choice" =~ ^[0-9]+$ ]] || { print_message "ERROR" "$(t invalid_input)"; continue; }
             selected_index=$((user_choice - 1))
@@ -3382,7 +3730,6 @@ restore_backup() {
         SELECTED_BACKUP="${SORTED_BACKUP_FILES[$selected_index]}"
 
         clear
-        print_message "INFO" "$(t rs_unpacking)"
 
         local local_extract_ok=true
         if [[ "$SELECTED_BACKUP" == *.age ]]; then
@@ -3392,11 +3739,13 @@ restore_backup() {
                 read -rp "$(t press_enter_back)"
                 return
             fi
+            ui_spin_start "$(t rs_unpacking)"
             (set -o pipefail; age -d -i <(printf '%s\n' "$AGE_PRIVATE_KEY") "$SELECTED_BACKUP" | tar -xzf - -C "$temp_restore_dir") || local_extract_ok=false
             [[ "$local_extract_ok" == "true" ]] && RESTORE_AGE_PUBLIC=$(printf '%s\n' "$AGE_PRIVATE_KEY" | _age_public_from_private)
             AGE_PRIVATE_KEY=""
             [[ "$local_extract_ok" == "false" ]] && print_message "ERROR" "$(t enc_decrypt_failed)"
         else
+            ui_spin_start "$(t rs_unpacking)"
             tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir" || local_extract_ok=false
         fi
         if [[ "$local_extract_ok" != "true" ]]; then
@@ -3456,30 +3805,29 @@ restore_backup() {
         if [[ "$BACKUP_DUMP_TYPE" == "dump" && "$CURRENT_DUMP_TYPE" == "dumpall" ]]; then
             print_message "INFO" "$(t rs_ext_options)"
             echo ""
-            echo " 1. $(t rs_opt_ext)"
-            echo " 2. $(t rs_opt_docker)"
-            echo " 0. $(t rs_opt_cancel)"
-            echo ""
+            ui_menu_reset
+            ui_menu_add 1 "$(t rs_opt_ext)"
+            ui_menu_add 2 "$(t rs_opt_docker)"
+            ui_menu_add 0 "$(t rs_opt_cancel)"
             
             local ext_choice
-            read -rp "${GREEN}[?]${RESET} $(t your_choice)" ext_choice
+            ui_menu_choose ext_choice
             
             case "$ext_choice" in
                 1)
                     print_message "ACTION" "$(t rs_enter_ext)"
                     echo ""
-                    read -rp "   $(t rs_host)" DB_HOST
-                    read -rp "   $(t rs_port)" input_db_port
+                    ui_input DB_HOST "$(t rs_host)" "db.example.com"
+                    ui_input input_db_port "$(t rs_port)"
                     DB_PORT="${input_db_port:-5432}"
-                    read -rp "   $(t rs_dbname)" input_db_name
+                    ui_input input_db_name "$(t rs_dbname)"
                     DB_NAME="${input_db_name:-postgres}"
-                    read -rp "   $(t rs_user)" input_db_user
+                    ui_input input_db_user "$(t rs_user)"
                     DB_USER="${input_db_user:-postgres}"
-                    read -rsp "   $(t rs_pass)" DB_PASSWORD
-                    echo ""
-                    read -rp "   $(t rs_ssl)" input_ssl
+                    ui_secret DB_PASSWORD "$(t rs_pass)"
+                    ui_input input_ssl "$(t rs_ssl)"
                     DB_SSL_MODE="${input_ssl:-prefer}"
-                    read -rp "   $(t rs_pgver)" input_pg_ver
+                    ui_input input_pg_ver "$(t rs_pgver)"
                     DB_POSTGRES_VERSION="${input_pg_ver:-17}"
                     
                     DB_CONNECTION_TYPE="external"
@@ -3518,7 +3866,7 @@ restore_backup() {
             print_message "WARN" "$(t rs_dumpall_ext)"
             print_message "WARN" "$(t rs_dumpall_warn)"
             echo ""
-            read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_continue_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" compat_confirm
+            ui_confirm compat_confirm "$(t rs_continue_q)"
             if [[ ! "$compat_confirm" =~ ^[yY]$ ]]; then
                 print_message "INFO" "$(t rs_cancelled)"
                 rm -rf "$temp_restore_dir"
@@ -3546,19 +3894,19 @@ restore_backup() {
         echo ""
         print_message "INFO" "$(t rs_panel_found)"
         echo ""
-        read -rp "$(echo -e "${GREEN}[?]${RESET} $(t rs_panel_q) (${GREEN}Y${RESET}/${RED}N${RESET}): ")" confirm_panel
+        ui_confirm confirm_panel "$(t rs_panel_q)"
         echo ""
         if [[ ! "$confirm_panel" =~ ^[Yy]$ ]]; then
             scope_cancelled=true
         elif [[ -n "$PANEL_DUMP" && -n "$PANEL_DIR_ARCHIVE" ]]; then
             echo "$(t rs_panel_scope_title)"
-            echo " 1. $(t rs_scope_all)"
-            echo " 2. $(t rs_scope_db)"
-            echo " 3. $(t rs_scope_files)"
-            echo " 0. $(t back)"
-            echo ""
+            ui_menu_reset
+            ui_menu_add 1 "$(t rs_scope_all)"
+            ui_menu_add 2 "$(t rs_scope_db)"
+            ui_menu_add 3 "$(t rs_scope_files)"
+            ui_menu_add 0 "$(t back)"
             local scope_choice
-            read -rp "${GREEN}[?]${RESET} $(t select_option)" scope_choice
+            ui_menu_choose scope_choice
             echo ""
             case "$scope_choice" in
                 1) restore_scope="all" ;;
@@ -3647,7 +3995,7 @@ restore_backup() {
                     print_message "SUCCESS" "$(t rs_ext_ok)"
                 fi
 
-                print_message "INFO" "$(t rs_restoring_db)"
+                ui_spin_start "$(t rs_restoring_db)"
                 gunzip "$PANEL_DUMP"
                 local sql_file="${PANEL_DUMP%.gz}"
                 local restore_log="$temp_restore_dir/restore_errors.log"
@@ -3660,6 +4008,7 @@ restore_backup() {
                 fi
 
                 if ! restore_panel_db_dump "$sql_file" "$restore_db_name" "$restore_log"; then
+                    ui_spin_stop
                     echo ""
                     print_message "ERROR" "$(t rs_db_err)"
                     [[ -f "$restore_log" ]] && cat "$restore_log"
@@ -3804,8 +4153,7 @@ update_script() {
 
     if compare_versions "$VERSION" "$REMOTE_VERSION"; then
         print_message "ACTION" "$(t upd_new_avail) ${BOLD}${REMOTE_VERSION}${RESET}."
-        echo -e -n "$(t upd_confirm) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-        read -r confirm_update
+        ui_confirm confirm_update "$(t upd_confirm)"
         echo ""
 
         if [[ "${confirm_update,,}" != "y" ]]; then
@@ -3875,8 +4223,7 @@ remove_script() {
     echo  " - $(t rm_symlink)"
     echo  " - $(t rm_cron)"
     echo ""
-    echo -e -n "$(t rm_confirm) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-    read -r confirm
+    ui_confirm confirm "$(t rm_confirm)"
     echo ""
     
     if [[ "${confirm,,}" != "y" ]]; then
@@ -3893,8 +4240,7 @@ remove_script() {
 
     local keep_backups="n"
     if [[ -d "$BACKUP_DIR" ]] && compgen -G "$BACKUP_DIR"/* > /dev/null 2>&1; then
-        echo -e -n "$(t rm_keep_backups_q) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: "
-        read -r keep_backups
+        ui_confirm keep_backups "$(t rm_keep_backups_q)"
         echo ""
         if [[ "${keep_backups,,}" == "y" ]]; then
             local saved_backups_dir="/opt/rw-backup-restore-saved"
@@ -3950,18 +4296,28 @@ configure_upload_method() {
         clear
         echo -e "${GREEN}${BOLD}$(t ul_title)${RESET}"
         echo ""
-        print_message "INFO" "$(t ul_current) ${BOLD}${UPLOAD_METHOD^^}${RESET}"
+        local cur_method cur_mark
+        case "$UPLOAD_METHOD" in
+            s3) cur_method="$(printf "$(t sum_upload_s3)" "$(_s3_configured_nums | wc -l)")" ;;
+
+            *) cur_method="Telegram" ;;
+        esac
+        print_message "INFO" "$(t ul_current) ${BOLD}${cur_method}${RESET}"
+        echo -e "   ${LIGHT_GRAY}$(t ul_tg_note)${RESET}"
         echo ""
-        echo " 1. $(t ul_set_tg)"
-        echo " 2. $(t ul_set_gd)"
-        echo " 3. $(t ul_set_s3)"
-        echo ""
-        echo " 0. $(t back_to_menu)"
-        echo ""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" choice
+        cur_mark=" ${GREEN}✓ $(t ul_current_mark)${RESET}"
+        ui_menu_reset
+        ui_menu_add 1 "$(t ul_set_tg)$([[ "$UPLOAD_METHOD" == "telegram" ]] && echo "$cur_mark")"
+        ui_menu_add 2 "$(t ul_set_s3)$([[ "$UPLOAD_METHOD" == "s3" ]] && echo "$cur_mark")"
+        ui_menu_gap
+        ui_menu_add 3 "$(t st_s3_settings)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
         echo ""
 
         case $choice in
+            3) s3_settings_menu; continue ;;
             1)
                 UPLOAD_METHOD="telegram"
                 save_config
@@ -3970,81 +4326,15 @@ configure_upload_method() {
                     print_message "ACTION" "$(t ul_tg_enter)"
                     echo ""
                     print_message "INFO" "$(t cfg_create_bot) ${CYAN}@BotFather${RESET}"
-                    read -rp "   $(t ul_enter_token)" BOT_TOKEN
+                    ui_input BOT_TOKEN "$(t ul_enter_token)" "123456789:AAH..."
                     echo ""
                     print_message "INFO" "$(t ul_tg_id_help) ${CYAN}@userinfobot${RESET}"
-                    read -rp "   $(t ul_enter_tg_id)" CHAT_ID
+                    ui_input CHAT_ID "$(t ul_enter_tg_id)" "-1001234567890"
                     save_config
                     print_message "SUCCESS" "$(t ul_tg_saved)"
                 fi
                 ;;
             2)
-                UPLOAD_METHOD="google_drive"
-                print_message "SUCCESS" "$(t ul_gd_set)"
-                
-                local gd_setup_successful=true
-
-                if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
-                    print_message "ACTION" "$(t ul_gd_enter)"
-                    echo ""
-                    echo "$(t st_gd_no_tokens)"
-                    local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                    print_message "LINK" "$(t cfg_gd_guide) ${CYAN}${guide_url}${RESET}"
-                    read -rp "   $(t cfg_enter_gd_id)" GD_CLIENT_ID
-                    read -rp "   $(t cfg_enter_gd_secret)" GD_CLIENT_SECRET
-                    
-                    clear
-                    
-                    print_message "WARN" "$(t cfg_gd_auth_needed)"
-                    print_message "INFO" "$(t cfg_gd_open_url)"
-                    echo ""
-                    local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
-                    print_message "INFO" "${CYAN}${auth_url}${RESET}"
-                    echo ""
-                    read -rp "   $(t cfg_gd_enter_code)" AUTH_CODE
-                    
-                    print_message "INFO" "$(t cfg_gd_getting)"
-                    local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
-                        -d client_id="$GD_CLIENT_ID" \
-                        -d client_secret="$GD_CLIENT_SECRET" \
-                        -d code="$AUTH_CODE" \
-                        -d redirect_uri="urn:ietf:wg:oauth:2.0:oob" \
-                        -d grant_type="authorization_code")
-                    
-                    GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
-                    
-                    if [[ -z "$GD_REFRESH_TOKEN" || "$GD_REFRESH_TOKEN" == "null" ]]; then
-                        print_message "ERROR" "$(t ul_gd_fail)"
-                        print_message "WARN" "$(t ul_gd_not_done)"
-                        UPLOAD_METHOD="telegram"
-                        gd_setup_successful=false
-                    else
-                        print_message "SUCCESS" "$(t ul_gd_token_ok)"
-                    fi
-                    echo
-                    
-                    if $gd_setup_successful; then
-                        echo "   $(t cfg_gd_folder1)"
-                        echo "   $(t cfg_gd_folder2)"
-                        echo "   $(t cfg_gd_folder3)"
-                        echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-                        echo "   $(t cfg_gd_folder4)"
-                        echo "   $(t cfg_gd_folder5)"
-                        echo
-
-                        read -rp "   $(t cfg_enter_gd_folder)" GD_FOLDER_ID
-                    fi
-                fi
-
-                save_config
-
-                if $gd_setup_successful; then
-                    print_message "SUCCESS" "$(t ul_gd_saved)"
-                else
-                    print_message "SUCCESS" "$(t ul_tg_set)"
-                fi
-                ;;
-            3)
                 if ! install_aws_cli; then
                     print_message "WARN" "$(t ul_s3_aws_needed)"
                     echo ""
@@ -4060,20 +4350,19 @@ configure_upload_method() {
                 if [[ -z "$S3_BUCKET" || -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" ]]; then
                     print_message "ACTION" "$(t ul_s3_enter)"
                     echo ""
-                    read -rp "   $(t ul_s3_enter_endpoint)" S3_ENDPOINT
-                    read -rp "   $(t ul_s3_enter_region)" S3_REGION
+                    ui_input S3_ENDPOINT "$(t ul_s3_enter_endpoint)" "https://s3.example.com"
+                    ui_input S3_REGION "$(t ul_s3_enter_region)"
                     S3_REGION="${S3_REGION:-us-east-1}"
-                    read -rp "   $(t ul_s3_enter_bucket)" S3_BUCKET
-                    read -rp "   $(t ul_s3_enter_access)" S3_ACCESS_KEY
-                    read -rp "   $(t ul_s3_enter_secret)" S3_SECRET_KEY
+                    ui_input S3_BUCKET "$(t ul_s3_enter_bucket)" "rw-backups"
+                    ui_input S3_ACCESS_KEY "$(t ul_s3_enter_access)"
+                    ui_input S3_SECRET_KEY "$(t ul_s3_enter_secret)"
                     echo ""
                     echo "   $(t ul_s3_prefix_info1)"
                     echo "   $(t ul_s3_prefix_info2)"
-                    read -rp "   $(t ul_s3_enter_prefix)" S3_PREFIX
+                    ui_input S3_PREFIX "$(t ul_s3_enter_prefix)" "server-1"
                     echo ""
                     print_message "INFO" "$(t ul_s3_retain_info)"
-                    read -rp "   $(printf "$(t ul_s3_enter_retain)" "$S3_RETAIN_DAYS")" input_s3_retain
-                    S3_RETAIN_DAYS="${input_s3_retain:-$S3_RETAIN_DAYS}"
+                    _ask_retention S3_RETAIN_DAYS "$(t ul_s3_enter_retain)" "$S3_RETAIN_DAYS"
                     
                     if [[ -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" || -z "$S3_BUCKET" ]]; then
                         print_message "ERROR" "$(t ul_s3_fail)"
@@ -4100,574 +4389,670 @@ configure_upload_method() {
     echo ""
 }
 
+settings_telegram() {
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t st_tg_title)${RESET}"
+        echo ""
+        local tg_token_shown="$(t not_set)"
+        if [[ -n "$BOT_TOKEN" ]]; then
+            local tg_token_tail="${BOT_TOKEN#*:}"
+            tg_token_shown="${BOT_TOKEN%%:*}:****${tg_token_tail: -4}"
+        fi
+        print_message "INFO" "$(t st_tg_token) ${BOLD}${tg_token_shown}${RESET}"
+        print_message "INFO" "$(t st_tg_chatid) ${BOLD}${CHAT_ID}${RESET}"
+        print_message "INFO" "$(t st_tg_thread) ${BOLD}${TG_MESSAGE_THREAD_ID:-$(t not_set)}${RESET}"
+        print_message "INFO" "$(t st_tg_proxy) ${BOLD}${TG_PROXY:-$(t not_set)}${RESET}"
+        echo ""
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t st_tg_change_token)"
+        ui_menu_add 2 "$(t st_tg_change_id)"
+        ui_menu_add 3 "$(t st_tg_change_thread)"
+        ui_menu_add 4 "$(t st_tg_change_proxy)"
+        ui_menu_add 5 "$(t st_tg_test_proxy)"
+        ui_menu_add 6 "$(t st_tg_test_msg)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose telegram_choice
+        echo ""
+
+        case $telegram_choice in
+            6)
+                if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
+                    print_message "ERROR" "$(t st_tg_test_msg_nocfg)"
+                else
+                    ui_spin_start "$(t st_tg_test_msg_sending)"
+                    local tg_test_out
+                    if tg_test_out=$(send_telegram_message "✅ $(t st_tg_test_msg_text)" "None" 2>&1); then
+                        print_message "SUCCESS" "$(t st_tg_test_msg_ok)"
+                    else
+                        print_message "ERROR" "$(t st_tg_test_msg_fail)"
+                        [[ -n "$tg_test_out" ]] && echo -e "$tg_test_out"
+                    fi
+                fi
+                ;;
+            1)
+                print_message "INFO" "$(t cfg_create_bot)"
+                ui_input NEW_BOT_TOKEN "$(t st_tg_enter_token)" "123456789:AAH..."
+                BOT_TOKEN="$NEW_BOT_TOKEN"
+                save_config
+                print_message "SUCCESS" "$(t st_tg_token_ok)"
+                ;;
+            2)
+                print_message "INFO" "$(t st_tg_chatid_desc)"
+                echo -e "   $(t cfg_chatid_help)"
+                ui_input NEW_CHAT_ID "$(t st_tg_enter_id)" "-1001234567890"
+                CHAT_ID="$NEW_CHAT_ID"
+                save_config
+                print_message "SUCCESS" "$(t st_tg_id_ok)"
+                ;;
+            3)
+                print_message "INFO" "$(t st_tg_thread_info)"
+                echo -e "   $(t cfg_thread_empty)"
+                ui_input NEW_TG_MESSAGE_THREAD_ID "$(t st_tg_enter_thread)"
+                TG_MESSAGE_THREAD_ID="$NEW_TG_MESSAGE_THREAD_ID"
+                save_config
+                print_message "SUCCESS" "$(t st_tg_thread_ok)"
+                ;;
+            4)
+                print_message "INFO" "$(t st_tg_proxy_info)"
+                print_message "INFO" "$(t st_tg_proxy_examples)"
+                echo ""
+                ui_input NEW_TG_PROXY "$(t st_tg_enter_proxy)"
+                TG_PROXY="$NEW_TG_PROXY"
+                save_config
+                if [[ -n "$TG_PROXY" ]]; then
+                    print_message "SUCCESS" "$(t st_tg_proxy_ok)"
+                else
+                    print_message "SUCCESS" "$(t st_tg_proxy_cleared)"
+                fi
+                ;;
+            5)
+                if [[ -z "$TG_PROXY" ]]; then
+                    print_message "ERROR" "$(t st_tg_proxy_not_set)"
+                else
+                    print_message "INFO" "$(t st_tg_proxy_testing)"
+                    local max_attempts=3
+                    local attempt=1
+                    local success=false
+                    while [[ $attempt -le $max_attempts ]]; do
+                        print_message "INFO" "$(printf "$(t st_tg_proxy_attempt)" "$attempt" "$max_attempts")"
+                        local start_time=$SECONDS
+                        local curl_output curl_exit
+                        if curl_output=$(curl -s --connect-timeout 10 --max-time 15 \
+                            --proxy "$TG_PROXY" \
+                            "https://api.telegram.org/bot$BOT_TOKEN/getMe" 2>&1); then
+                            curl_exit=0
+                        else
+                            curl_exit=$?
+                        fi
+                        local elapsed=$((SECONDS - start_time))
+                        if [[ $curl_exit -eq 0 && "$curl_output" == *'"ok":true'* ]]; then
+                            print_message "SUCCESS" "$(printf "$(t st_tg_proxy_test_ok)" "$elapsed")"
+                            success=true
+                            break
+                        else
+                            print_message "ERROR" "$(printf "$(t st_tg_proxy_attempt_fail)" "$attempt" "$elapsed")"
+                            case $curl_exit in
+                                0)  echo -e "${YELLOW}Details: Connected, but Telegram did not confirm the bot token: ${curl_output}${RESET}" ;;
+                                7)  echo -e "${YELLOW}Details: Could not connect to proxy (exit $curl_exit)${RESET}" ;;
+                                28) echo -e "${YELLOW}Details: Connection timed out (exit $curl_exit)${RESET}" ;;
+                                35) echo -e "${YELLOW}Details: SSL handshake failed (exit $curl_exit)${RESET}" ;;
+                                *)  echo -e "${YELLOW}Details: curl error (exit $curl_exit): ${curl_output}${RESET}" ;;
+                            esac
+                            if [[ $attempt -lt $max_attempts ]]; then
+                                sleep 5
+                            fi
+                        fi
+                        ((attempt++)) || true
+                    done
+                    if [[ "$success" == "false" ]]; then
+                        print_message "ERROR" "$(t st_tg_proxy_test_fail)"
+                    fi
+                fi
+                ;;
+            0) break ;;
+            *) print_message "ERROR" "$(t invalid_input_select)" ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+settings_language() {
+    clear
+    echo -e "${GREEN}${BOLD}$(t st_lang)${RESET}"
+    echo ""
+    print_message "INFO" "$(t st_lang_current) ${BOLD}${LANG_CODE}${RESET}"
+    echo ""
+    select_language_interactive
+    save_config
+    print_message "SUCCESS" "$(t st_lang_changed) ${BOLD}${LANG_CODE}${RESET}"
+    echo ""
+    read -rp "$(t press_enter)"
+}
+
+settings_autoupdate() {
+    clear
+    echo -e "${GREEN}${BOLD}$(t st_auto_update)${RESET}"
+    echo ""
+    if [[ "$AUTO_UPDATE" == "true" ]]; then
+        print_message "INFO" "$(t st_auto_update_status) ${BOLD}${GREEN}$(t st_auto_update_on)${RESET}"
+    else
+        print_message "INFO" "$(t st_auto_update_status) ${BOLD}${RED}$(t st_auto_update_off)${RESET}"
+    fi
+    echo ""
+    ui_menu_reset
+    ui_menu_add 1 "$(t st_auto_update_enable)"
+    ui_menu_add 2 "$(t st_auto_update_disable)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose auto_upd_choice
+    echo ""
+    case $auto_upd_choice in
+        1)
+            AUTO_UPDATE="true"
+            save_config
+            print_message "SUCCESS" "$(t st_auto_update_enabled)"
+            ;;
+        2)
+            AUTO_UPDATE="false"
+            save_config
+            print_message "SUCCESS" "$(t st_auto_update_disabled)"
+            ;;
+        0) return ;;
+        *) print_message "ERROR" "$(t invalid_input_select)" ;;
+    esac
+    echo ""
+    read -rp "$(t press_enter)"
+}
+
 configure_settings() {
     while true; do
         clear
         echo -e "${GREEN}${BOLD}$(t st_title)${RESET}"
         echo ""
-        echo " 1. $(t st_tg_settings)"
-        echo " 2. $(t st_gd_settings)"
-        echo " 3. $(t st_s3_settings)"
-        echo " 4. $(t st_db_settings)"
-        echo " 5. $(t st_path_settings)"
-        echo " 6. $(t st_retention_settings)"
-        echo " 7. $(t st_lang)"
-        echo " 8. $(t st_auto_update)"
-        echo " 9. $(t enc_title)"
+        ui_menu_reset
+        ui_menu_add 1 "$(t st_tg_settings)"
+        ui_menu_add 2 "$(t enc_title)"
+        ui_menu_add 3 "$(t st_lang)"
+        ui_menu_add 4 "$(t st_auto_update)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
         echo ""
-        echo " 0. $(t back_to_menu)"
+        case $choice in
+            1) settings_telegram ;;
+            2) configure_encryption ;;
+            3) settings_language ;;
+            4) settings_autoupdate ;;
+            0) break ;;
+        esac
+    done
+}
+
+_bot_folder_for() {
+    case "$1" in
+        "Бот от Иисуса") echo "remnawave-telegram-shop" ;;
+        "Приватный бот от Иисуса") echo "rwp-shop" ;;
+        "Бот от Мачки") echo "remnawave-tg-shop" ;;
+        "Бот от Snoups") echo "remnashop" ;;
+        "Бот Minishop") echo "remnawave-minishop" ;;
+        *) echo "bot" ;;
+    esac
+}
+
+_panel_configured() { [[ -n "$REMNALABS_ROOT_DIR" && "$REMNALABS_ROOT_DIR" != "none" ]]; }
+_bot_configured() { [[ -n "$BOT_BACKUP_SELECTED" && -n "$BOT_BACKUP_PATH" ]]; }
+
+_backup_mode() {
+    if [[ "$SKIP_PANEL_BACKUP" != "true" ]]; then
+        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then echo both; else echo panel; fi
+    else
+        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then echo bot; else echo none; fi
+    fi
+}
+
+_backup_mode_label() {
+    case "$1" in
+        both) t bm_both ;;
+        panel) t bm_panel ;;
+        bot) t bm_bot ;;
+        *) t bm_none ;;
+    esac
+}
+
+_confirm_missing_dir() {
+    local _cmd_ans
+    [[ -d "$1" ]] && return 0
+    print_message "WARN" "$(t st_path_missing) ${BOLD}$1${RESET}"
+    ui_confirm _cmd_ans "$(t st_path_continue)"
+    [[ "$_cmd_ans" == "y" ]]
+}
+
+_panel_pick_path() {
+    local _pp_choice _pp_path
+    print_message "ACTION" "$(t st_path_select)"
+    ui_menu_reset
+    ui_menu_add 1 "/opt/remnawave"
+    ui_menu_add 2 "/root/remnawave"
+    ui_menu_add 3 "/opt/stacks/remnawave"
+    ui_menu_add 4 "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    while true; do
+        ui_menu_choose _pp_choice
+        case "$_pp_choice" in
+            1) _pp_path="/opt/remnawave" ;;
+            2) _pp_path="/root/remnawave" ;;
+            3) _pp_path="/opt/stacks/remnawave" ;;
+            4)
+                echo ""
+                ui_input _pp_path "$(t st_path_enter)" "/opt/remnawave"
+                if [[ -z "$_pp_path" || "$_pp_path" != /* ]]; then
+                    print_message "ERROR" "$(t cfg_path_abs)"
+                    continue
+                fi
+                _pp_path="${_pp_path%/}"
+                ;;
+            0) return 1 ;;
+            *) continue ;;
+        esac
+        _confirm_missing_dir "$_pp_path" || continue
+        printf -v "$1" '%s' "$_pp_path"
+        return 0
+    done
+}
+
+_bot_pick() {
+    local _bp_choice
+    print_message "ACTION" "$(t bot_select_title)"
+    ui_menu_reset
+    ui_menu_add 1 "$(t bot_jesus)"
+    ui_menu_add 2 "$(t bot_jesus_priv)"
+    ui_menu_add 3 "$(t bot_machka)"
+    ui_menu_add 4 "$(t bot_snoups)"
+    ui_menu_add 5 "$(t bot_minishop)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose _bp_choice
+    case "$_bp_choice" in
+        1) printf -v "$1" '%s' "Бот от Иисуса" ;;
+        2) printf -v "$1" '%s' "Приватный бот от Иисуса" ;;
+        3) printf -v "$1" '%s' "Бот от Мачки" ;;
+        4) printf -v "$1" '%s' "Бот от Snoups" ;;
+        5) printf -v "$1" '%s' "Бот Minishop" ;;
+        *) return 1 ;;
+    esac
+}
+
+_bot_pick_path() {
+    local _bpp_folder _bpp_choice _bpp_path
+    _bpp_folder=$(_bot_folder_for "$2")
+    print_message "ACTION" "$(t bot_select_path)"
+    ui_menu_reset
+    ui_menu_add 1 "/opt/$_bpp_folder"
+    ui_menu_add 2 "/root/$_bpp_folder"
+    ui_menu_add 3 "/opt/stacks/$_bpp_folder"
+    ui_menu_add 4 "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    while true; do
+        ui_menu_choose _bpp_choice
+        case "$_bpp_choice" in
+            1) _bpp_path="/opt/$_bpp_folder" ;;
+            2) _bpp_path="/root/$_bpp_folder" ;;
+            3) _bpp_path="/opt/stacks/$_bpp_folder" ;;
+            4)
+                echo ""
+                ui_input _bpp_path "$(t bot_enter_path)" "/opt/$_bpp_folder"
+                if [[ -z "$_bpp_path" || "$_bpp_path" != /* ]]; then
+                    print_message "ERROR" "$(t bot_path_absolute)"
+                    continue
+                fi
+                _bpp_path="${_bpp_path%/}"
+                ;;
+            0) return 1 ;;
+            *) continue ;;
+        esac
+        _confirm_missing_dir "$_bpp_path" || continue
+        printf -v "$1" '%s' "$_bpp_path"
+        return 0
+    done
+}
+
+_bot_setup_wizard() {
+    local _bw_name _bw_path _bw_user
+    _bot_pick _bw_name || return 1
+    echo ""
+    _bot_pick_path _bw_path "$_bw_name" || return 1
+    echo ""
+    ui_input _bw_user "$(t bot_db_user)" "postgres"
+    BOT_BACKUP_SELECTED="$_bw_name"
+    BOT_BACKUP_PATH="$_bw_path"
+    BOT_BACKUP_DB_USER="${_bw_user:-postgres}"
+    return 0
+}
+
+backup_mode_menu() {
+    local cur choice want
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t bm_title)${RESET}"
         echo ""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" choice
+        cur=$(_backup_mode)
+        print_aligned_rows "$(t bm_current)" "$(_backup_mode_label "$cur")"
+        echo ""
+        ui_menu_reset
+        local m n=1
+        for m in both panel bot; do
+            if [[ "$m" == "$cur" ]]; then
+                ui_menu_add "$n" "$(_backup_mode_label "$m") ${GREEN}✓ $(t ul_current_mark)${RESET}"
+            else
+                ui_menu_add "$n" "$(_backup_mode_label "$m")"
+            fi
+            n=$((n + 1))
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        case "$choice" in
+            1) want=both ;;
+            2) want=panel ;;
+            3) want=bot ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        [[ "$want" == "$cur" ]] && return
+        echo ""
+
+        if [[ "$want" != "bot" ]] && ! _panel_configured; then
+            local new_path
+            print_message "INFO" "$(t bm_need_panel)"
+            _panel_pick_path new_path || continue
+            REMNALABS_ROOT_DIR="$new_path"
+            DB_USER="${DB_USER:-postgres}"
+            echo ""
+        fi
+        if [[ "$want" != "panel" ]] && ! _bot_configured; then
+            print_message "INFO" "$(t bm_need_bot)"
+            _bot_setup_wizard || continue
+            echo ""
+        fi
+
+        case "$want" in
+            both)  SKIP_PANEL_BACKUP="false"; BOT_BACKUP_ENABLED="true" ;;
+            panel) SKIP_PANEL_BACKUP="false"; BOT_BACKUP_ENABLED="false" ;;
+            bot)   SKIP_PANEL_BACKUP="true";  BOT_BACKUP_ENABLED="true" ;;
+        esac
+        save_config
+        return
+    done
+}
+
+settings_panel() {
+    local choice
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t pn_title)${RESET}"
+        echo ""
+        if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+            print_message "WARN" "$(t pn_off_note)"
+            echo ""
+        fi
+        local path_disp="${REMNALABS_ROOT_DIR}"
+        _panel_configured || path_disp="${YELLOW}$(t not_set)"
+        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            print_aligned_rows \
+                "$(t pn_path)" "$path_disp" \
+                "$(t st_db_type)" "$(t st_db_type_ext)" \
+                "$(t st_db_host_label)" "${DB_HOST:-$(t not_set)}:${DB_PORT}" \
+                "$(t st_db_name_label)" "$DB_NAME" \
+                "$(t st_db_user_label)" "$DB_USER" \
+                "$(t st_db_ssl_label)" "$DB_SSL_MODE" \
+                "$(t st_db_pgver_label)" "$DB_POSTGRES_VERSION"
+        else
+            print_aligned_rows \
+                "$(t pn_path)" "$path_disp" \
+                "$(t st_db_type)" "$(t st_db_type_docker) (remnawave-db)" \
+                "$(t st_db_user_label)" "$DB_USER"
+        fi
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t pn_change_path)"
+        ui_menu_add 2 "$(t st_db_change_type)"
+        ui_menu_add 3 "$(t st_db_change_user)"
+        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            ui_menu_add 4 "$(t st_db_ext_settings)"
+            ui_menu_add 5 "$(t st_db_test)"
+        fi
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
         echo ""
 
         case $choice in
             1)
-                while true; do
-                    clear
-                    echo -e "${GREEN}${BOLD}$(t st_tg_title)${RESET}"
-                    echo ""
-                    print_message "INFO" "$(t st_tg_token) ${BOLD}${BOT_TOKEN}${RESET}"
-                    print_message "INFO" "$(t st_tg_chatid) ${BOLD}${CHAT_ID}${RESET}"
-                    print_message "INFO" "$(t st_tg_thread) ${BOLD}${TG_MESSAGE_THREAD_ID:-$(t not_set)}${RESET}"
-                    print_message "INFO" "$(t st_tg_proxy) ${BOLD}${TG_PROXY:-$(t not_set)}${RESET}"
-                    echo ""
-                    echo ""
-                    echo " 1. $(t st_tg_change_token)"
-                    echo " 2. $(t st_tg_change_id)"
-                    echo " 3. $(t st_tg_change_thread)"
-                    echo " 4. $(t st_tg_change_proxy)"
-                    echo " 5. $(t st_tg_test_proxy)"
-                    echo ""
-                    echo " 0. $(t back)"
-                    echo ""
-                    read -rp "${GREEN}[?]${RESET} $(t select_option)" telegram_choice
-                    echo ""
-
-                    case $telegram_choice in
-                        1)
-                            print_message "INFO" "$(t cfg_create_bot)"
-                            read -rp "   $(t st_tg_enter_token)" NEW_BOT_TOKEN
-                            BOT_TOKEN="$NEW_BOT_TOKEN"
-                            save_config
-                            print_message "SUCCESS" "$(t st_tg_token_ok)"
-                            ;;
-                        2)
-                            print_message "INFO" "$(t st_tg_chatid_desc)"
-                            echo -e "   $(t cfg_chatid_help)"
-                            read -rp "   $(t st_tg_enter_id)" NEW_CHAT_ID
-                            CHAT_ID="$NEW_CHAT_ID"
-                            save_config
-                            print_message "SUCCESS" "$(t st_tg_id_ok)"
-                            ;;
-                        3)
-                            print_message "INFO" "$(t st_tg_thread_info)"
-                            echo -e "   $(t cfg_thread_empty)"
-                            read -rp "   $(t st_tg_enter_thread)" NEW_TG_MESSAGE_THREAD_ID
-                            TG_MESSAGE_THREAD_ID="$NEW_TG_MESSAGE_THREAD_ID"
-                            save_config
-                            print_message "SUCCESS" "$(t st_tg_thread_ok)"
-                            ;;
-                        4)
-                            print_message "INFO" "$(t st_tg_proxy_info)"
-                            print_message "INFO" "$(t st_tg_proxy_examples)"
-                            echo ""
-                            read -rp "   $(t st_tg_enter_proxy)" NEW_TG_PROXY
-                            TG_PROXY="$NEW_TG_PROXY"
-                            save_config
-                            if [[ -n "$TG_PROXY" ]]; then
-                                print_message "SUCCESS" "$(t st_tg_proxy_ok)"
-                            else
-                                print_message "SUCCESS" "$(t st_tg_proxy_cleared)"
-                            fi
-                            ;;
-                        5)
-                            if [[ -z "$TG_PROXY" ]]; then
-                                print_message "ERROR" "$(t st_tg_proxy_not_set)"
-                            else
-                                print_message "INFO" "$(t st_tg_proxy_testing)"
-                                local max_attempts=3
-                                local attempt=1
-                                local success=false
-                                while [[ $attempt -le $max_attempts ]]; do
-                                    print_message "INFO" "$(printf "$(t st_tg_proxy_attempt)" "$attempt" "$max_attempts")"
-                                    local start_time=$SECONDS
-                                    local curl_output curl_exit
-                                    if curl_output=$(curl -s --connect-timeout 10 --max-time 15 \
-                                        --proxy "$TG_PROXY" \
-                                        "https://api.telegram.org/bot$BOT_TOKEN/getMe" 2>&1); then
-                                        curl_exit=0
-                                    else
-                                        curl_exit=$?
-                                    fi
-                                    local elapsed=$((SECONDS - start_time))
-                                    if [[ $curl_exit -eq 0 && "$curl_output" == *'"ok":true'* ]]; then
-                                        print_message "SUCCESS" "$(printf "$(t st_tg_proxy_test_ok)" "$elapsed")"
-                                        success=true
-                                        break
-                                    else
-                                        print_message "ERROR" "$(printf "$(t st_tg_proxy_attempt_fail)" "$attempt" "$elapsed")"
-                                        case $curl_exit in
-                                            0)  echo -e "${YELLOW}Details: Connected, but Telegram did not confirm the bot token: ${curl_output}${RESET}" ;;
-                                            7)  echo -e "${YELLOW}Details: Could not connect to proxy (exit $curl_exit)${RESET}" ;;
-                                            28) echo -e "${YELLOW}Details: Connection timed out (exit $curl_exit)${RESET}" ;;
-                                            35) echo -e "${YELLOW}Details: SSL handshake failed (exit $curl_exit)${RESET}" ;;
-                                            *)  echo -e "${YELLOW}Details: curl error (exit $curl_exit): ${curl_output}${RESET}" ;;
-                                        esac
-                                        if [[ $attempt -lt $max_attempts ]]; then
-                                            sleep 5
-                                        fi
-                                    fi
-                                    ((attempt++)) || true
-                                done
-                                if [[ "$success" == "false" ]]; then
-                                    print_message "ERROR" "$(t st_tg_proxy_test_fail)"
-                                fi
-                            fi
-                            ;;
-                        0) break ;;
-                        *) print_message "ERROR" "$(t invalid_input_select)" ;;
-                    esac
-                    echo ""
-                    read -rp "$(t press_enter)"
-                done
+                local new_path
+                _panel_pick_path new_path || continue
+                REMNALABS_ROOT_DIR="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t st_path_ok) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                 ;;
-
             2)
-                while true; do
-                    clear
-                    echo -e "${GREEN}${BOLD}$(t st_gd_title)${RESET}"
-                    echo ""
-                    print_message "INFO" "$(t st_gd_client_id) ${BOLD}${GD_CLIENT_ID:0:8}...${RESET}"
-                    print_message "INFO" "$(t st_gd_secret) ${BOLD}${GD_CLIENT_SECRET:0:8}...${RESET}"
-                    print_message "INFO" "$(t st_gd_refresh) ${BOLD}${GD_REFRESH_TOKEN:0:8}...${RESET}"
-                    print_message "INFO" "$(t st_gd_folder) ${BOLD}${GD_FOLDER_ID:-$(t root_folder)}${RESET}"
-                    echo ""
-                    echo " 1. $(t st_gd_change_id)"
-                    echo " 2. $(t st_gd_change_secret)"
-                    echo " 3. $(t st_gd_change_refresh)"
-                    echo " 4. $(t st_gd_change_folder)"
-                    echo ""
-                    echo " 0. $(t back)"
-                    echo ""
-                    read -rp "${GREEN}[?]${RESET} $(t select_option)" gd_choice
-                    echo ""
-
-                    case $gd_choice in
-                        1)
-                            echo "$(t st_gd_no_tokens)"
-                            local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                            print_message "LINK" "$(t cfg_gd_guide) ${CYAN}${guide_url}${RESET}"
-                            read -rp "   $(t st_gd_enter_id)" NEW_GD_CLIENT_ID
-                            GD_CLIENT_ID="$NEW_GD_CLIENT_ID"
-                            save_config
-                            print_message "SUCCESS" "$(t st_gd_id_ok)"
-                            ;;
-                        2)
-                            echo "$(t st_gd_no_tokens)"
-                            local guide_url="https://telegra.ph/Nastrojka-Google-API-06-02"
-                            print_message "LINK" "$(t cfg_gd_guide) ${CYAN}${guide_url}${RESET}"
-                            read -rp "   $(t st_gd_enter_secret)" NEW_GD_CLIENT_SECRET
-                            GD_CLIENT_SECRET="$NEW_GD_CLIENT_SECRET"
-                            save_config
-                            print_message "SUCCESS" "$(t st_gd_secret_ok)"
-                            ;;
-                        3)
-                            clear
-                            print_message "WARN" "$(t st_gd_auth_needed)"
-                            print_message "INFO" "$(t cfg_gd_open_url)"
+                local conn_type_choice
+                print_message "ACTION" "$(t st_db_select_type)"
+                ui_menu_reset
+                ui_menu_add 1 "$(t st_db_docker)"
+                ui_menu_add 2 "$(t st_db_external)"
+                ui_menu_gap
+                ui_menu_add 0 "$(t back)"
+                ui_menu_choose conn_type_choice
+                case "$conn_type_choice" in
+                    1)
+                        DB_CONNECTION_TYPE="docker"
+                        save_config
+                        print_message "SUCCESS" "$(t st_db_switched_docker)"
+                        ;;
+                    2)
+                        DB_CONNECTION_TYPE="external"
+                        if [[ -z "$DB_HOST" ]]; then
                             echo ""
-                            local auth_url="https://accounts.google.com/o/oauth2/auth?client_id=${GD_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&scope=https://www.googleapis.com/auth/drive&response_type=code&access_type=offline"
-                            print_message "LINK" "${CYAN}${auth_url}${RESET}"
+                            print_message "ACTION" "$(t st_db_need_ext_params)"
                             echo ""
-                            read -rp "   $(t st_gd_enter_code)" AUTH_CODE
-                            
-                            print_message "INFO" "$(t cfg_gd_getting)"
-                            local token_response=$(curl -s -X POST https://oauth2.googleapis.com/token \
-                                -d client_id="$GD_CLIENT_ID" \
-                                -d client_secret="$GD_CLIENT_SECRET" \
-                                -d code="$AUTH_CODE" \
-                                -d redirect_uri="urn:ietf:wg:oauth:2.0:oob" \
-                                -d grant_type="authorization_code")
-                            
-                            NEW_GD_REFRESH_TOKEN=$(echo "$token_response" | jq -r .refresh_token 2>/dev/null)
-                            
-                            if [[ -z "$NEW_GD_REFRESH_TOKEN" || "$NEW_GD_REFRESH_TOKEN" == "null" ]]; then
-                                print_message "ERROR" "$(t st_gd_fail)"
-                                print_message "WARN" "$(t st_gd_not_done)"
-                            else
-                                GD_REFRESH_TOKEN="$NEW_GD_REFRESH_TOKEN"
-                                save_config
-                                print_message "SUCCESS" "$(t st_gd_token_ok)"
-                            fi
-                            ;;
-                        4)
-                            echo
-                            echo "   $(t cfg_gd_folder1)"
-                            echo "   $(t cfg_gd_folder2)"
-                            echo "   $(t cfg_gd_folder3)"
-                            echo "      https://drive.google.com/drive/folders/1a2B3cD4eFmNOPqRstuVwxYz"
-                            echo "   $(t cfg_gd_folder4)"
-                            echo "   $(t cfg_gd_folder5)"
-                            echo
-                            read -rp "   $(t st_gd_enter_folder)" NEW_GD_FOLDER_ID
-                            GD_FOLDER_ID="$NEW_GD_FOLDER_ID"
-                            save_config
-                            print_message "SUCCESS" "$(t st_gd_folder_ok)"
-                            ;;
-                        0) break ;;
-                        *) print_message "ERROR" "$(t invalid_input_select)" ;;
-                    esac
-                    echo ""
-                    read -rp "$(t press_enter)"
-                done
+                            local input_db_port input_db_name input_ssl input_pg_ver
+                            ui_input DB_HOST "$(t rs_host)" "db.example.com"
+                            ui_input input_db_port "$(t rs_port)" "5432"
+                            DB_PORT="${input_db_port:-5432}"
+                            ui_input input_db_name "$(t rs_dbname)" "postgres"
+                            DB_NAME="${input_db_name:-postgres}"
+                            ui_secret DB_PASSWORD "$(t rs_pass)"
+                            ui_input input_ssl "$(t rs_ssl)" "prefer"
+                            DB_SSL_MODE="${input_ssl:-prefer}"
+                            ui_input input_pg_ver "$(t rs_pgver)" "17"
+                            DB_POSTGRES_VERSION="${input_pg_ver:-17}"
+                        fi
+                        save_config
+                        print_message "SUCCESS" "$(t st_db_switched_ext)"
+                        ;;
+                    *) continue ;;
+                esac
                 ;;
-
             3)
-                s3_settings_menu
+                local new_db_user
+                ui_input new_db_user "$(printf "$(t st_db_enter_user)" "$DB_USER")" "$DB_USER"
+                DB_USER="${new_db_user:-$DB_USER}"
+                save_config
+                print_message "SUCCESS" "$(t st_db_user_ok) ${BOLD}${DB_USER}${RESET}"
                 ;;
-
             4)
-                while true; do
-                    clear
-                    echo -e "${GREEN}${BOLD}$(t st_db_title)${RESET}"
-                    echo ""
-                    if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-                        print_message "INFO" "$(t st_db_type) ${BOLD}${GREEN}$(t st_db_type_ext)${RESET}"
-                        print_message "INFO" "$(t st_db_host_label) ${BOLD}${DB_HOST:-$(t not_set)}${RESET}"
-                        print_message "INFO" "$(t st_db_port_label) ${BOLD}${DB_PORT}${RESET}"
-                        print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-                        print_message "INFO" "$(t st_db_name_label) ${BOLD}${DB_NAME}${RESET}"
-                        print_message "INFO" "$(t st_db_ssl_label) ${BOLD}${DB_SSL_MODE}${RESET}"
-                        print_message "INFO" "$(t st_db_pgver_label) ${BOLD}${DB_POSTGRES_VERSION}${RESET}"
-                    else
-                        print_message "INFO" "$(t st_db_type) ${BOLD}${GREEN}$(t st_db_type_docker)${RESET} (remnawave-db)"
-                        print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-                    fi
-                    echo ""
-                    echo " 1. $(t st_db_change_type)"
-                    echo " 2. $(t st_db_change_user)"
-                    if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-                        echo " 3. $(t st_db_ext_settings)"
-                        echo " 4. $(t st_db_test)"
-                    fi
-                    echo ""
-                    echo " 0. $(t back)"
-                    echo ""
-                    read -rp "${GREEN}[?]${RESET} $(t select_option)" db_choice
-                    echo ""
-
-                    case $db_choice in
-                        1)
-                            echo "$(t st_db_select_type)"
-                            echo " 1. $(t st_db_docker)"
-                            echo " 2. $(t st_db_external)"
-                            echo ""
-                            read -rp "${GREEN}[?]${RESET} $(t your_choice)" conn_type_choice
-                            case "$conn_type_choice" in
-                                1)
-                                    DB_CONNECTION_TYPE="docker"
-                                    save_config
-                                    print_message "SUCCESS" "$(t st_db_switched_docker)"
-                                    ;;
-                                2)
-                                    DB_CONNECTION_TYPE="external"
-                                    if [[ -z "$DB_HOST" ]]; then
-                                        echo ""
-                                        print_message "ACTION" "$(t st_db_need_ext_params)"
-                                        echo ""
-                                        read -rp "   $(t rs_host)" DB_HOST
-                                        read -rp "   $(t rs_port)" input_db_port
-                                        DB_PORT="${input_db_port:-5432}"
-                                        read -rp "   $(t rs_dbname)" input_db_name
-                                        DB_NAME="${input_db_name:-postgres}"
-                                        read -rsp "   $(t rs_pass)" DB_PASSWORD
-                                        echo ""
-                                        read -rp "   $(t rs_ssl)" input_ssl
-                                        DB_SSL_MODE="${input_ssl:-prefer}"
-                                        read -rp "   $(t rs_pgver)" input_pg_ver
-                                        DB_POSTGRES_VERSION="${input_pg_ver:-17}"
-                                    fi
-                                    save_config
-                                    print_message "SUCCESS" "$(t st_db_switched_ext)"
-                                    ;;
-                                *)
-                                    print_message "ERROR" "$(t invalid_input)"
-                                    ;;
-                            esac
-                            ;;
-                        2)
-                            print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-                            echo ""
-                            read -rp "   $(printf "$(t st_db_enter_user)" "$DB_USER")" NEW_DB_USER
-                            DB_USER="${NEW_DB_USER:-postgres}"
-                            save_config
-                            print_message "SUCCESS" "$(t st_db_user_ok) ${BOLD}${DB_USER}${RESET}."
-                            ;;
-                        3)
-                            if [[ "$DB_CONNECTION_TYPE" != "external" ]]; then
-                                print_message "ERROR" "$(t invalid_input)"
-                            else
-                                clear
-                                echo -e "${GREEN}${BOLD}$(t st_db_ext_settings)${RESET}"
-                                echo ""
-                                print_message "INFO" "$(t st_db_host_label) ${BOLD}${DB_HOST:-$(t not_set)}${RESET}"
-                                print_message "INFO" "$(t st_db_port_label) ${BOLD}${DB_PORT}${RESET}"
-                                print_message "INFO" "$(t st_db_name_label) ${BOLD}${DB_NAME}${RESET}"
-                                print_message "INFO" "$(t st_db_ssl_label) ${BOLD}${DB_SSL_MODE}${RESET}"
-                                print_message "INFO" "$(t st_db_pgver_label) ${BOLD}${DB_POSTGRES_VERSION}${RESET}"
-                                echo ""
-                                read -rp "   $(printf "$(t st_db_enter_host)" "$DB_HOST")" new_host
-                                [[ -n "$new_host" ]] && DB_HOST="$new_host"
-                                read -rp "   $(printf "$(t st_db_enter_port)" "$DB_PORT")" new_port
-                                [[ -n "$new_port" ]] && DB_PORT="$new_port"
-                                read -rp "   $(printf "$(t st_db_enter_name)" "$DB_NAME")" new_dbname
-                                [[ -n "$new_dbname" ]] && DB_NAME="$new_dbname"
-                                read -rsp "   $(t st_db_enter_pass)" new_pass
-                                echo ""
-                                [[ -n "$new_pass" ]] && DB_PASSWORD="$new_pass"
-                                read -rp "   $(printf "$(t st_db_enter_ssl)" "$DB_SSL_MODE")" new_ssl
-                                [[ -n "$new_ssl" ]] && DB_SSL_MODE="$new_ssl"
-                                read -rp "   $(printf "$(t st_db_enter_pgver)" "$DB_POSTGRES_VERSION")" new_pgver
-                                [[ -n "$new_pgver" ]] && DB_POSTGRES_VERSION="$new_pgver"
-                                
-                                save_config
-                                print_message "SUCCESS" "$(t st_db_ext_saved)"
-                            fi
-                            ;;
-                        4)
-                            if [[ "$DB_CONNECTION_TYPE" != "external" ]]; then
-                                print_message "ERROR" "$(t st_db_only_ext)"
-                            else
-                                print_message "INFO" "$(t st_db_testing) ${BOLD}${DB_HOST}:${DB_PORT}${RESET}..."
-                                local pg_image=$(get_postgres_image)
-                                
-                                if docker run --rm --network host \
-                                    -e PGPASSWORD="$DB_PASSWORD" \
-                                    -e PGSSLMODE="$DB_SSL_MODE" \
-                                    "$pg_image" \
-                                    pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; then
-                                    print_message "SUCCESS" "$(t st_db_test_ok)"
-                                else
-                                    print_message "ERROR" "$(t st_db_test_fail)"
-                                fi
-                            fi
-                            ;;
-                        0) break ;;
-                        *) print_message "ERROR" "$(t invalid_input)" ;;
-                    esac
-                    echo ""
-                    read -rp "$(t press_enter)"
-                done
+                [[ "$DB_CONNECTION_TYPE" == "external" ]] || continue
+                local new_host new_port new_dbname new_pass new_ssl new_pgver
+                ui_input new_host "$(printf "$(t st_db_enter_host)" "$DB_HOST")" "$DB_HOST"
+                [[ -n "$new_host" ]] && DB_HOST="$new_host"
+                ui_input new_port "$(printf "$(t st_db_enter_port)" "$DB_PORT")" "$DB_PORT"
+                [[ -n "$new_port" ]] && DB_PORT="$new_port"
+                ui_input new_dbname "$(printf "$(t st_db_enter_name)" "$DB_NAME")" "$DB_NAME"
+                [[ -n "$new_dbname" ]] && DB_NAME="$new_dbname"
+                ui_secret new_pass "$(t st_db_enter_pass)"
+                [[ -n "$new_pass" ]] && DB_PASSWORD="$new_pass"
+                ui_input new_ssl "$(printf "$(t st_db_enter_ssl)" "$DB_SSL_MODE")" "$DB_SSL_MODE"
+                [[ -n "$new_ssl" ]] && DB_SSL_MODE="$new_ssl"
+                ui_input new_pgver "$(printf "$(t st_db_enter_pgver)" "$DB_POSTGRES_VERSION")" "$DB_POSTGRES_VERSION"
+                [[ -n "$new_pgver" ]] && DB_POSTGRES_VERSION="$new_pgver"
+                save_config
+                print_message "SUCCESS" "$(t st_db_ext_saved)"
                 ;;
-
             5)
-                clear
-                echo -e "${GREEN}${BOLD}$(t st_path_title)${RESET}"
-                echo ""
-                print_message "INFO" "$(t st_path_current) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-                echo ""
-                print_message "ACTION" "$(t st_path_select)"
-                echo " 1. /opt/remnawave"
-                echo " 2. /root/remnawave"
-                echo " 3. /opt/stacks/remnawave"
-                echo " 4. $(t custom_path)"
-                echo ""
-                echo " 0. $(t back)"
-                echo ""
-
-                local new_remnawave_path_choice
-                while true; do
-                    read -rp "${GREEN}[?]${RESET} $(t select_variant)" new_remnawave_path_choice
-                    case "$new_remnawave_path_choice" in
-                    1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
-                    2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
-                    3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
-                    4) 
-                        echo ""
-                        print_message "INFO" "$(t st_path_enter)"
-                        read -rp "   $(t path_prompt)" new_custom_remnawave_path
-        
-                        if [[ -z "$new_custom_remnawave_path" ]]; then
-                            print_message "ERROR" "$(t cfg_path_empty)"
-                            echo ""
-                            read -rp "$(t press_enter)"
-                            continue
-                        fi
-        
-                        if [[ ! "$new_custom_remnawave_path" = /* ]]; then
-                            print_message "ERROR" "$(t cfg_path_abs)"
-                            echo ""
-                            read -rp "$(t press_enter)"
-                            continue
-                        fi
-        
-                        new_custom_remnawave_path="${new_custom_remnawave_path%/}"
-        
-                        if [[ ! -d "$new_custom_remnawave_path" ]]; then
-                            print_message "WARN" "$(t st_path_missing) ${BOLD}${new_custom_remnawave_path}${RESET}"
-                            read -rp "$(echo -e "${GREEN}[?]${RESET} $(t st_path_continue) ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_new_custom_path
-                            if [[ "$confirm_new_custom_path" != "y" ]]; then
-                                echo ""
-                                read -rp "$(t press_enter)"
-                                continue
-                            fi
-                        fi
-        
-                        REMNALABS_ROOT_DIR="$new_custom_remnawave_path"
-                        print_message "SUCCESS" "$(t st_path_set) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-                        break 
-                        ;;
-                    0) 
-                        return
-                        ;;
-                    *) print_message "ERROR" "$(t invalid_input)" ;;
-                    esac
-                done
-                save_config
-                print_message "SUCCESS" "$(t st_path_ok) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
-                echo ""
-                read -rp "$(t press_enter)"
-                ;;
-
-            6)
-                clear
-                echo -e "${GREEN}${BOLD}$(t st_retention_title)${RESET}"
-                echo ""
-                print_message "INFO" "$(t st_retention_local) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
-
-                local -a ret_s3_nums=()
-                while IFS= read -r ret_s3_num; do
-                    local ret_s3_chk_bucket=$(_s3_var BUCKET "$ret_s3_num")
-                    local ret_s3_chk_access=$(_s3_var ACCESS_KEY "$ret_s3_num")
-                    local ret_s3_chk_secret=$(_s3_var SECRET_KEY "$ret_s3_num")
-                    if [[ -z "$ret_s3_chk_bucket" || -z "$ret_s3_chk_access" || -z "$ret_s3_chk_secret" ]]; then
-                        continue
-                    fi
-                    ret_s3_nums+=("$ret_s3_num")
-                    local ret_s3_lbl=$(_s3_label "$ret_s3_num")
-                    local ret_s3_days=$(_s3_var RETAIN_DAYS "$ret_s3_num")
-                    print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$ret_s3_days" "$(t st_retention_days)")${RESET} (${ret_s3_lbl})"
-                done < <(_s3_configured_nums)
-
-                echo ""
-                echo " 1. $(t st_retention_change_local)"
-                echo " 2. $(t st_retention_change_s3)"
-                echo ""
-                echo " 0. $(t back)"
-                echo ""
-                read -rp "${GREEN}[?]${RESET} $(t select_option)" ret_choice
-                echo ""
-
-                case $ret_choice in
-                    1)
-                        echo " 1. $(t st_retention_days)"
-                        echo " 2. $(t st_retention_hours)"
-                        read -rp "   $(t select_option)" unit_choice
-                        case $unit_choice in
-                            1) RETAIN_BACKUPS_UNIT="days" ;;
-                            2) RETAIN_BACKUPS_UNIT="hours" ;;
-                        esac
-                        echo "   $(t st_retention_disable_hint)"
-                        read -rp "   $(printf "$(t st_retention_enter_local)" "$RETAIN_BACKUPS_VALUE")" new_local_ret
-                        RETAIN_BACKUPS_VALUE="${new_local_ret:-$RETAIN_BACKUPS_VALUE}"
-                        save_config
-                        print_message "SUCCESS" "$(t st_retention_local_ok) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
-                        ;;
-
-                    2)
-                        local ret_target_num=""
-                        if [[ "${#ret_s3_nums[@]}" -gt 1 ]]; then
-                            echo "   $(t st_retention_pick_s3)"
-                            local ri=0
-                            local ret_pick_num
-                            for ret_pick_num in "${ret_s3_nums[@]}"; do
-                                ri=$((ri + 1))
-                                echo "   ${ri}. $(_s3_label "$ret_pick_num")"
-                            done
-                            local ret_pick_choice
-                            read -rp "   $(t select_option)" ret_pick_choice
-                            if [[ "$ret_pick_choice" =~ ^[0-9]+$ ]] && [[ "$ret_pick_choice" -ge 1 ]] && [[ "$ret_pick_choice" -le "${#ret_s3_nums[@]}" ]]; then
-                                ret_target_num="${ret_s3_nums[$((ret_pick_choice - 1))]}"
-                            else
-                                print_message "ERROR" "$(t invalid_input_select)"
-                                echo ""
-                                read -rp "$(t press_enter)"
-                                continue
-                            fi
-                        elif [[ "${#ret_s3_nums[@]}" -eq 1 ]]; then
-                            ret_target_num="${ret_s3_nums[0]}"
-                        fi
-
-                        local ret_target_days
-                        ret_target_days=$(_s3_var RETAIN_DAYS "$ret_target_num")
-                        echo "   $(t st_retention_disable_hint)"
-                        read -rp "   $(printf "$(t st_retention_enter_s3)" "$ret_target_days")" new_s3_ret
-                        _s3_set RETAIN_DAYS "$ret_target_num" "${new_s3_ret:-$ret_target_days}"
-                        save_config
-                        print_message "SUCCESS" "$(t st_retention_s3_ok) ${BOLD}$(_retention_display "$(_s3_var RETAIN_DAYS "$ret_target_num")" "$(t st_retention_days)")${RESET} ($(_s3_label "$ret_target_num"))"
-                        ;;
-                    0) ;;
-                    *) print_message "ERROR" "$(t invalid_input_select)" ;;
-                esac
-                unset ret_s3_nums
-                echo ""
-                read -rp "$(t press_enter)"
-                ;;
-
-            7)
-                clear
-                echo -e "${GREEN}${BOLD}$(t st_lang)${RESET}"
-                echo ""
-                print_message "INFO" "$(t st_lang_current) ${BOLD}${LANG_CODE}${RESET}"
-                echo ""
-                select_language_interactive
-                save_config
-                print_message "SUCCESS" "$(t st_lang_changed) ${BOLD}${LANG_CODE}${RESET}"
-                echo ""
-                read -rp "$(t press_enter)"
-                ;;
-
-            8)
-                clear
-                echo -e "${GREEN}${BOLD}$(t st_auto_update)${RESET}"
-                echo ""
-                if [[ "$AUTO_UPDATE" == "true" ]]; then
-                    print_message "INFO" "$(t st_auto_update_status) ${BOLD}${GREEN}$(t st_auto_update_on)${RESET}"
+                [[ "$DB_CONNECTION_TYPE" == "external" ]] || continue
+                local pg_image
+                pg_image=$(get_postgres_image)
+                ui_spin_start "$(t st_db_testing) ${BOLD}${DB_HOST}:${DB_PORT}${RESET}"
+                if docker run --rm --network host \
+                    -e PGPASSWORD="$DB_PASSWORD" \
+                    -e PGSSLMODE="$DB_SSL_MODE" \
+                    "$pg_image" \
+                    pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1; then
+                    print_message "SUCCESS" "$(t st_db_test_ok)"
                 else
-                    print_message "INFO" "$(t st_auto_update_status) ${BOLD}${RED}$(t st_auto_update_off)${RESET}"
+                    print_message "ERROR" "$(t st_db_test_fail)"
                 fi
-                echo ""
-                echo " 1. $(t st_auto_update_enable)"
-                echo " 2. $(t st_auto_update_disable)"
-                echo ""
-                echo " 0. $(t back)"
-                echo ""
-                read -rp "${GREEN}[?]${RESET} $(t select_option)" auto_upd_choice
-                echo ""
-                case $auto_upd_choice in
-                    1)
-                        AUTO_UPDATE="true"
-                        save_config
-                        print_message "SUCCESS" "$(t st_auto_update_enabled)"
-                        ;;
-                    2)
-                        AUTO_UPDATE="false"
-                        save_config
-                        print_message "SUCCESS" "$(t st_auto_update_disabled)"
-                        ;;
-                    0) ;;
-                    *) print_message "ERROR" "$(t invalid_input_select)" ;;
-                esac
-                echo ""
-                read -rp "$(t press_enter)"
                 ;;
-
-            9) configure_encryption ;;
-
-            0) break ;;
-            *) print_message "ERROR" "$(t invalid_input_select)" ;;
+            0) return ;;
+            *) continue ;;
         esac
         echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+settings_bot() {
+    local choice
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t bot_cfg_title)${RESET}"
+        echo ""
+        if ! _bot_configured; then
+            print_message "INFO" "$(t bot_not_set_note)"
+            echo ""
+            ui_menu_reset
+            ui_menu_add 1 "$(t bot_menu_setup)" primary
+            ui_menu_gap
+            ui_menu_add 0 "$(t back)"
+            ui_menu_choose choice
+            echo ""
+            case "$choice" in
+                1)
+                    _bot_setup_wizard || continue
+                    BOT_BACKUP_ENABLED="true"
+                    save_config
+                    echo ""
+                    print_message "SUCCESS" "$(printf "$(t bot_setup_done)" "$(_backup_mode_label "$(_backup_mode)")")"
+                    echo ""
+                    read -rp "$(t press_enter)"
+                    ;;
+                0) return ;;
+            esac
+            continue
+        fi
+
+        if [[ "$BOT_BACKUP_ENABLED" != "true" ]]; then
+            print_message "WARN" "$(t bot_off_note)"
+            echo ""
+        fi
+        print_aligned_rows \
+            "$(t bot_label)" "${GREEN}${BOT_BACKUP_SELECTED}" \
+            "$(t bot_path_label)" "$BOT_BACKUP_PATH" \
+            "$(t bot_db_user_label)" "$BOT_BACKUP_DB_USER"
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t bot_menu_change)"
+        ui_menu_add 2 "$(t bot_menu_path)"
+        ui_menu_add 3 "$(t bot_menu_db_user)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        echo ""
+        case "$choice" in
+            1)
+                local new_bot new_path
+                _bot_pick new_bot || continue
+                echo ""
+                _bot_pick_path new_path "$new_bot" || continue
+                BOT_BACKUP_SELECTED="$new_bot"
+                BOT_BACKUP_PATH="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t bot_changed) ${BOLD}${BOT_BACKUP_SELECTED}${RESET}"
+                ;;
+            2)
+                local new_path
+                _bot_pick_path new_path "$BOT_BACKUP_SELECTED" || continue
+                BOT_BACKUP_PATH="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t bot_path_changed) ${BOLD}${BOT_BACKUP_PATH}${RESET}"
+                ;;
+            3)
+                local new_user
+                ui_input new_user "$(t bot_db_user)" "$BOT_BACKUP_DB_USER"
+                BOT_BACKUP_DB_USER="${new_user:-$BOT_BACKUP_DB_USER}"
+                save_config
+                print_message "SUCCESS" "$(t bot_db_user_changed) ${BOLD}${BOT_BACKUP_DB_USER}${RESET}"
+                ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+menu_what_to_backup() {
+    local choice mode panel_val bot_val
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t wb_title)${RESET}"
+        echo ""
+        mode=$(_backup_mode)
+
+        if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+            panel_val="${LIGHT_GRAY}$(t wb_not_included)"
+        elif ! _panel_configured; then
+            panel_val="${YELLOW}$(t wb_not_set)"
+        elif [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            panel_val="${REMNALABS_ROOT_DIR} · $(printf "$(t sum_db_ext)" "${DB_HOST}:${DB_PORT}")"
+        else
+            panel_val="${REMNALABS_ROOT_DIR} · $(t sum_db_docker)"
+        fi
+
+        if ! _bot_configured; then
+            bot_val="${LIGHT_GRAY}$(t wb_not_set)"
+        elif [[ "$BOT_BACKUP_ENABLED" != "true" ]]; then
+            bot_val="${LIGHT_GRAY}$(t wb_not_included) · ${BOT_BACKUP_SELECTED}"
+        else
+            bot_val="${BOT_BACKUP_SELECTED} · ${BOT_BACKUP_PATH}"
+        fi
+
+        local mode_val="${GREEN}$(_backup_mode_label "$mode")"
+        [[ "$mode" == "none" ]] && mode_val="${RED}$(_backup_mode_label none)"
+        print_aligned_rows \
+            "$(t wb_mode)" "$mode_val" \
+            "$(t wb_panel)" "$panel_val" \
+            "$(t wb_bot)" "$bot_val"
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t wb_menu_panel)"
+        ui_menu_add 2 "$(t wb_menu_bot)"
+        ui_menu_add 3 "$(t wb_menu_mode)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        case $choice in
+            1) settings_panel ;;
+            2) settings_bot ;;
+            3) backup_mode_menu ;;
+            0) return ;;
+        esac
     done
 }
 
@@ -4678,16 +5063,16 @@ show_logs() {
         echo ""
         print_message "INFO" "$(t lg_dir) ${BOLD}${LOG_DIR}${RESET}"
         echo ""
-        echo " 1. $(t lg_backup)"
-        echo " 2. $(t lg_restore)"
-        echo " 3. $(t lg_system)"
-        echo " 4. $(t lg_errors)"
-        echo " 5. $(t lg_cron)"
-        echo ""
-        echo " 0. $(t back)"
-        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t lg_backup)"
+        ui_menu_add 2 "$(t lg_restore)"
+        ui_menu_add 3 "$(t lg_system)"
+        ui_menu_add 4 "$(t lg_errors)"
+        ui_menu_add 5 "$(t lg_cron)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
         local lg_choice lg_file=""
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" lg_choice
+        ui_menu_choose lg_choice
         echo ""
         case "$lg_choice" in
             1) lg_file="backup.log" ;;
@@ -4739,6 +5124,7 @@ check_update_status() {
 
     local REMOTE_VERSION
     REMOTE_VERSION=$(grep -m 1 "^VERSION=" "$TEMP_REMOTE_VERSION_FILE" | cut -d'"' -f2)
+    UPDATE_REMOTE_VERSION="$REMOTE_VERSION"
     rm -f "$TEMP_REMOTE_VERSION_FILE"
 
     if [[ -z "$REMOTE_VERSION" ]]; then
@@ -4782,49 +5168,186 @@ check_update_status() {
     fi
 }
 
+_ui_human_size() {
+    local bytes="$1" units
+    if [[ "$LANG_CODE" == "en" ]]; then units="B KB MB GB TB"; else units="Б КБ МБ ГБ ТБ"; fi
+    awk -v b="$bytes" -v u="$units" -v ru="$([[ "$LANG_CODE" == "en" ]] && echo 0 || echo 1)" 'BEGIN{
+        split(u, n, " "); i = 1
+        while (b >= 1024 && i < 5) { b /= 1024; i++ }
+        s = (i == 1) ? sprintf("%d %s", b, n[i]) : sprintf("%.1f %s", b, n[i])
+        sub(/\.0 /, " ", s)
+        if (ru) gsub(/\./, ",", s)
+        print s
+    }'
+}
+
+_ui_strip() {
+    sed $'s/\x1b\\[[0-9;]*m//g' <<< "$1"
+}
+
+_ui_status_card() {
+    local LC_ALL=C.UTF-8
+    local title="$1"; shift
+    local title_plain lw=0 vw=0 i j label plain inner cols hr="" pad
+    title_plain=$(_ui_strip "$title")
+    for ((i = 1; i <= $#; i += 2)); do
+        j=$((i + 1))
+        label="${!i}"
+        plain=$(_ui_strip "${!j}")
+        (( ${#label} > lw )) && lw=${#label}
+        (( ${#plain} > vw )) && vw=${#plain}
+    done
+    inner=$(( lw + 3 + vw ))
+    (( ${#title_plain} > inner )) && inner=${#title_plain}
+    cols=$(tput cols 2>/dev/null || echo 80)
+
+    if (( inner + 6 > cols )); then
+        echo -e "  ${title/  /${RESET}\\n  }${RESET}"
+        echo ""
+        for ((i = 1; i <= $#; i += 2)); do
+            j=$((i + 1)); label="${!i}"
+            echo -e "  ${LIGHT_GRAY}${label}${RESET}$(printf '%*s' $((lw - ${#label} + 3)) '')${!j}${RESET}"
+        done
+        return 0
+    fi
+
+    for ((i = 0; i < inner + 4; i++)); do hr+="─"; done
+    echo -e "${GREEN}╭${hr}╮${RESET}"
+    echo -e "${GREEN}│${RESET}  ${title}${RESET}$(printf '%*s' $((inner - ${#title_plain} + 2)) '')${GREEN}│${RESET}"
+    echo -e "${GREEN}├${hr}┤${RESET}"
+    for ((i = 1; i <= $#; i += 2)); do
+        j=$((i + 1)); label="${!i}"
+        plain=$(_ui_strip "${!j}")
+        pad=$(( inner - lw - 3 - ${#plain} + 2 ))
+        echo -e "${GREEN}│${RESET}  ${LIGHT_GRAY}${label}${RESET}$(printf '%*s' $((lw - ${#label} + 3)) '')${!j}${RESET}$(printf '%*s' "$pad" '')${GREEN}│${RESET}"
+    done
+    echo -e "${GREEN}╰${hr}╯${RESET}"
+}
+
+show_status_card() {
+    local title title_main title_by db_val last_val sched_val enc_val up_val bot_val newest
+
+    title_main="$(t menu_title)"
+    title_by=""
+    if [[ "$title_main" == *" by "* ]]; then
+        title_by="${title_main##* by }"
+        title_main="${title_main% by *}"
+        title_by="by ${title_by} · "
+    fi
+    title="${GREEN}${BOLD}${title_main}${RESET}  ${LIGHT_GRAY}${title_by}v${VERSION}${RESET}"
+
+    if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+        db_val="${BOLD}$(printf "$(t sum_db_ext)" "${DB_HOST}:${DB_PORT}")"
+    else
+        db_val="${BOLD}$(t sum_db_docker)"
+    fi
+
+    newest=$(find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -printf "%T@ %s %p\n" 2>/dev/null | sort -nr | head -1)
+    if [[ -n "$newest" ]]; then
+        local ts size
+        ts=${newest%%.*}
+        size=$(awk '{print $2}' <<< "$newest")
+        last_val="${BOLD}$(date -d "@$ts" '+%d.%m.%Y %H:%M') · $(_ui_human_size "$size")"
+    else
+        last_val="${YELLOW}$(t sum_none)"
+    fi
+
+    if [[ -n "$CRON_TIMES" ]]; then
+        sched_val="${BOLD}$(printf "$(t sum_schedule_utc)" "$CRON_TIMES")"
+    else
+        sched_val="${YELLOW}$(t sum_schedule_off)"
+    fi
+
+    if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
+        enc_val="${BOLD}$(t sum_enc_on)"
+    else
+        enc_val="$(t sum_enc_off)"
+    fi
+
+    case "$UPLOAD_METHOD" in
+        s3) up_val="${BOLD}$(printf "$(t sum_upload_s3)" "$(_s3_configured_nums | wc -l)")" ;;
+
+        *) up_val="${BOLD}$(t sum_upload_tg)" ;;
+    esac
+
+    case "$(_backup_mode)" in
+        both)  bot_val="${BOLD}$(t bm_panel_short) + ${BOT_BACKUP_SELECTED}" ;;
+        panel) bot_val="${BOLD}$(t bm_panel)" ;;
+        bot)   bot_val="${BOLD}${BOT_BACKUP_SELECTED}" ;;
+        *)     bot_val="${RED}$(t bm_none)" ;;
+    esac
+
+    local -a rows=(
+        "$(t sum_what)" "$bot_val"
+    )
+    [[ "$SKIP_PANEL_BACKUP" != "true" ]] && rows+=("$(t sum_db)" "$db_val")
+    rows+=(
+        "$(t sum_last_backup)" "$last_val"
+        "$(t sum_schedule)" "$sched_val"
+        "$(t sum_encryption)" "$enc_val"
+        "$(t sum_upload)" "$up_val"
+    )
+    local du used total s3_num s3_bytes s3_limit
+    du=$(_disk_usage)
+    if [[ -n "$du" ]]; then
+        read -r used total <<< "$du"
+        rows+=("$(t usage_disk)" "$(_usage_color "$used" "$total")$(_usage_text "$used" "$total")${LIGHT_GRAY}$(printf "$(t usage_keep)" "$(_retention_short "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")")
+    fi
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        local s3_keep
+        while IFS= read -r s3_num; do
+            s3_bytes=$(_s3_cached_usage "$s3_num")
+            s3_limit=$(_s3_limit_bytes "$s3_num")
+            s3_keep="$(printf "$(t usage_keep)" "$(_retention_short "$(_s3_var RETAIN_DAYS "$s3_num")" days)")"
+            if [[ -n "$s3_bytes" ]]; then
+                rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")${LIGHT_GRAY}${s3_keep}")
+            elif [[ -n "$s3_limit" ]]; then
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(printf "$(t usage_no_data_limit)" "$(_ui_human_size "$s3_limit")")${s3_keep}")
+            else
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(t usage_no_data)${s3_keep}")
+            fi
+        done < <(_s3_configured_nums)
+    fi
+
+    if [[ "$UPDATE_AVAILABLE" == true ]]; then
+        rows+=("$(t sum_update)" "${YELLOW}● $(printf "$(t sum_update_avail)" "${UPDATE_REMOTE_VERSION:-?}")")
+    fi
+    _ui_status_card "$title" "${rows[@]}"
+}
+
 main_menu() {
     while true; do
         LOG_CATEGORY="system"
         check_update_status
         clear
-        echo -e "${GREEN}${BOLD}$(t menu_title)${RESET} "
-        if [[ "$UPDATE_AVAILABLE" == true ]]; then
-            echo -e "${BOLD}${LIGHT_GRAY}$(t menu_version) ${VERSION} ${YELLOW}● $(t menu_update_avail)${RESET}"
-        else
-            echo -e "${BOLD}${LIGHT_GRAY}$(t menu_version) ${VERSION}${RESET}"
-        fi
-        
-        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-            echo -e "${LIGHT_GRAY}$(t menu_db_ext) (${DB_HOST}:${DB_PORT})${RESET}"
-        else
-            echo -e "${LIGHT_GRAY}$(t menu_db_docker)${RESET}"
-        fi
-        echo ""
-        echo -e "   ${GREEN}${BOLD}1. $(t menu_create_backup)${RESET}"
-        echo -e "   ${GREEN}${BOLD}2. $(t menu_restore)${RESET}"
-        echo ""
-        echo " 3. $(t menu_bot_backup)"
-        echo " 4. $(t menu_auto_send)"
-        echo " 5. $(t menu_upload_method)"
-        echo " 6. $(t menu_settings)"
-        echo " 7. $(t menu_logs)"
-        echo ""
-        echo -e "   ${YELLOW}8. $(t menu_update)${RESET}"
-        echo -e "   ${RED}9. $(t menu_remove)${RESET}"
-        echo ""
-        echo " 0. $(t exit)"
-        echo -e "   ${LIGHT_GRAY}—  $(t menu_shortcut)${RESET}"
-        echo -e "   ${LIGHT_GRAY}—  $(t menu_docs)${RESET}"
+
+        show_status_card
         echo ""
 
-        read -rp "${GREEN}[?]${RESET} $(t select_option)" choice
+        ui_menu_reset
+        ui_menu_add 1 "$(t menu_create_backup)" primary
+        ui_menu_add 2 "$(t menu_restore)" primary
+        ui_menu_gap
+        ui_menu_add 3 "$(t menu_what)"
+        ui_menu_add 4 "$(t menu_where)"
+        ui_menu_add 5 "$(t menu_schedule)"
+        ui_menu_add 6 "$(t menu_settings)"
+        ui_menu_add 7 "$(t menu_logs)"
+        ui_menu_gap
+        ui_menu_add 8 "$(t menu_update)" warn
+        ui_menu_add 9 "$(t menu_remove)" danger
+        ui_menu_gap
+        ui_menu_add 0 "$(t exit)"
+        ui_menu_footer "$(t menu_shortcut)"
+        ui_menu_footer "$(t menu_docs)"
+        ui_menu_choose choice "${choice:-}"
         echo ""
         case $choice in
-            1) create_backup ; read -rp "$(t press_enter)" ;;
+            1) create_backup || true; read -rp "$(t press_enter)" ;;
             2) restore_backup ;;
-            3) configure_bot_backup ;;
-            4) setup_auto_send ;;
-            5) configure_upload_method ;;
+            3) menu_what_to_backup ;;
+            4) configure_upload_method ;;
+            5) setup_auto_send ;;
             6) configure_settings ;;
             7) show_logs ;;
             8) update_script ;;
