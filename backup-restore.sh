@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.7"
+VERSION="4.2.8"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -5061,6 +5061,7 @@ check_update_status() {
 
     local REMOTE_VERSION
     REMOTE_VERSION=$(grep -m 1 "^VERSION=" "$TEMP_REMOTE_VERSION_FILE" | cut -d'"' -f2)
+    UPDATE_REMOTE_VERSION="$REMOTE_VERSION"
     rm -f "$TEMP_REMOTE_VERSION_FILE"
 
     if [[ -z "$REMOTE_VERSION" ]]; then
@@ -5116,35 +5117,67 @@ _ui_human_size() {
     }'
 }
 
-_ui_summary_rows() {
-    local LC_ALL=C.UTF-8
-    local w=0 i label
-    for ((i = 1; i <= $#; i += 2)); do
-        label="${!i}"
-        (( ${#label} > w )) && w=${#label}
-    done
-    for ((i = 1; i <= $#; i += 2)); do
-        local j=$((i + 1))
-        label="${!i}"
-        echo -e "  ${LIGHT_GRAY}${label}${RESET}$(printf '%*s' $((w - ${#label} + 3)) '')${!j}${RESET}"
-    done
+_ui_strip() {
+    sed $'s/\x1b\\[[0-9;]*m//g' <<< "$1"
 }
 
-_ui_header_box() {
+_ui_status_card() {
     local LC_ALL=C.UTF-8
-    local l1_plain="$1" l1="$2" l2_plain="$3" l2="$4" w hr i
-    w=${#l1_plain}
-    (( ${#l2_plain} > w )) && w=${#l2_plain}
-    hr=""
-    for ((i = 0; i < w + 4; i++)); do hr+="─"; done
+    local title="$1"; shift
+    local title_plain lw=0 vw=0 i j label plain inner cols hr="" pad
+    title_plain=$(_ui_strip "$title")
+    for ((i = 1; i <= $#; i += 2)); do
+        j=$((i + 1))
+        label="${!i}"
+        plain=$(_ui_strip "${!j}")
+        (( ${#label} > lw )) && lw=${#label}
+        (( ${#plain} > vw )) && vw=${#plain}
+    done
+    inner=$(( lw + 3 + vw ))
+    (( ${#title_plain} > inner )) && inner=${#title_plain}
+    cols=$(tput cols 2>/dev/null || echo 80)
+
+    if (( inner + 6 > cols )); then
+        echo -e "  ${title/  /${RESET}\\n  }${RESET}"
+        echo ""
+        for ((i = 1; i <= $#; i += 2)); do
+            j=$((i + 1)); label="${!i}"
+            echo -e "  ${LIGHT_GRAY}${label}${RESET}$(printf '%*s' $((lw - ${#label} + 3)) '')${!j}${RESET}"
+        done
+        return 0
+    fi
+
+    for ((i = 0; i < inner + 4; i++)); do hr+="─"; done
     echo -e "${GREEN}╭${hr}╮${RESET}"
-    echo -e "${GREEN}│${RESET}  ${l1}${RESET}$(printf '%*s' $((w - ${#l1_plain} + 2)) '')${GREEN}│${RESET}"
-    echo -e "${GREEN}│${RESET}  ${l2}${RESET}$(printf '%*s' $((w - ${#l2_plain} + 2)) '')${GREEN}│${RESET}"
+    echo -e "${GREEN}│${RESET}  ${title}${RESET}$(printf '%*s' $((inner - ${#title_plain} + 2)) '')${GREEN}│${RESET}"
+    echo -e "${GREEN}├${hr}┤${RESET}"
+    for ((i = 1; i <= $#; i += 2)); do
+        j=$((i + 1)); label="${!i}"
+        plain=$(_ui_strip "${!j}")
+        pad=$(( inner - lw - 3 - ${#plain} + 2 ))
+        echo -e "${GREEN}│${RESET}  ${LIGHT_GRAY}${label}${RESET}$(printf '%*s' $((lw - ${#label} + 3)) '')${!j}${RESET}$(printf '%*s' "$pad" '')${GREEN}│${RESET}"
+    done
     echo -e "${GREEN}╰${hr}╯${RESET}"
 }
 
-show_status_summary() {
-    local last_val sched_val enc_val up_val bot_val newest
+show_status_card() {
+    local title title_main title_by db_val last_val sched_val enc_val up_val bot_val newest
+
+    title_main="$(t menu_title)"
+    title_by=""
+    if [[ "$title_main" == *" by "* ]]; then
+        title_by="${title_main##* by }"
+        title_main="${title_main% by *}"
+        title_by="by ${title_by} · "
+    fi
+    title="${GREEN}${BOLD}${title_main}${RESET}  ${LIGHT_GRAY}${title_by}v${VERSION}${RESET}"
+
+    if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+        db_val="${BOLD}$(printf "$(t sum_db_ext)" "${DB_HOST}:${DB_PORT}")"
+    else
+        db_val="${BOLD}$(t sum_db_docker)"
+    fi
+
     newest=$(find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -printf "%T@ %s %p\n" 2>/dev/null | sort -nr | head -1)
     if [[ -n "$newest" ]]; then
         local ts size
@@ -5179,12 +5212,18 @@ show_status_summary() {
         bot_val="$(t sum_bot_off)"
     fi
 
-    _ui_summary_rows \
-        "$(t sum_last_backup)" "$last_val" \
-        "$(t sum_schedule)" "$sched_val" \
-        "$(t sum_encryption)" "$enc_val" \
-        "$(t sum_upload)" "$up_val" \
+    local -a rows=(
+        "$(t sum_db)" "$db_val"
+        "$(t sum_last_backup)" "$last_val"
+        "$(t sum_schedule)" "$sched_val"
+        "$(t sum_encryption)" "$enc_val"
+        "$(t sum_upload)" "$up_val"
         "$(t sum_bot)" "$bot_val"
+    )
+    if [[ "$UPDATE_AVAILABLE" == true ]]; then
+        rows+=("$(t sum_update)" "${YELLOW}● $(printf "$(t sum_update_avail)" "${UPDATE_REMOTE_VERSION:-?}")")
+    fi
+    _ui_status_card "$title" "${rows[@]}"
 }
 
 main_menu() {
@@ -5193,21 +5232,7 @@ main_menu() {
         check_update_status
         clear
 
-        local v_plain v_line db_plain
-        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-            db_plain="$(t menu_db_ext) (${DB_HOST}:${DB_PORT})"
-        else
-            db_plain="$(t menu_db_docker)"
-        fi
-        v_plain="$(t menu_version) ${VERSION} · ${db_plain}"
-        v_line="${LIGHT_GRAY}${v_plain}"
-        if [[ "$UPDATE_AVAILABLE" == true ]]; then
-            v_plain+=" · ● $(t menu_update_avail)"
-            v_line+=" · ${YELLOW}● $(t menu_update_avail)"
-        fi
-        _ui_header_box "$(t menu_title)" "${GREEN}${BOLD}$(t menu_title)" "$v_plain" "$v_line"
-        echo ""
-        show_status_summary
+        show_status_card
         echo ""
 
         ui_menu_reset
