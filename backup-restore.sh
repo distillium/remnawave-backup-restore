@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.12"
+VERSION="4.2.13"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -1930,6 +1930,101 @@ _retention_display() {
     fi
 }
 
+_retention_short() {
+    if [[ "${1:-0}" -le 0 ]] 2>/dev/null; then
+        t ret_forever
+    elif [[ "$2" == "hours" ]]; then
+        printf "$(t ret_short_hours)" "$1"
+    else
+        printf "$(t ret_short_days)" "$1"
+    fi
+}
+
+_ask_retention() {
+    local _ar_val
+    echo -e "   ${LIGHT_GRAY}$(t st_retention_disable_hint)${RESET}"
+    while true; do
+        ui_input _ar_val "$2" "$3"
+        _ar_val="${_ar_val:-$3}"
+        if [[ "$_ar_val" =~ ^[0-9]+$ ]]; then
+            printf -v "$1" '%s' "$((10#$_ar_val))"
+            return 0
+        fi
+        print_message "ERROR" "$(t ret_bad_number)"
+    done
+}
+
+_retention_set_local() {
+    local unit_choice new_unit new_val unit_word
+    print_message "ACTION" "$(t ret_pick_unit)"
+    ui_menu_reset
+    ui_menu_add 1 "$(t ret_unit_days)"
+    ui_menu_add 2 "$(t ret_unit_hours)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose unit_choice
+    case "$unit_choice" in
+        1) new_unit="days"; unit_word="$(t st_retention_days)" ;;
+        2) new_unit="hours"; unit_word="$(t st_retention_hours)" ;;
+        *) return 1 ;;
+    esac
+    echo ""
+    _ask_retention new_val "$(printf "$(t ret_enter_local)" "$unit_word")" "$RETAIN_BACKUPS_VALUE"
+    RETAIN_BACKUPS_UNIT="$new_unit"
+    RETAIN_BACKUPS_VALUE="$new_val"
+    save_config
+    print_message "SUCCESS" "$(t ret_local_ok) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
+}
+
+_retention_set_s3() {
+    local -a nums=()
+    local n pick target cur new_val i=0
+    while IFS= read -r n; do nums+=("$n"); done < <(_s3_configured_nums)
+    [[ ${#nums[@]} -eq 0 ]] && return 1
+    if [[ ${#nums[@]} -eq 1 ]]; then
+        target="${nums[0]}"
+    else
+        print_message "ACTION" "$(t st_retention_pick_s3)"
+        ui_menu_reset
+        for n in "${nums[@]}"; do
+            i=$((i + 1))
+            ui_menu_add "$i" "$(_s3_label "$n") ${LIGHT_GRAY}· $(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)${RESET}"
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose pick
+        [[ "$pick" =~ ^[0-9]+$ && "$pick" -ge 1 && "$pick" -le ${#nums[@]} ]] || return 1
+        target="${nums[$((pick - 1))]}"
+        echo ""
+    fi
+    cur=$(_s3_var RETAIN_DAYS "$target")
+    _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$target")")" "$cur"
+    _s3_set RETAIN_DAYS "$target" "$new_val"
+    save_config
+    print_message "SUCCESS" "$(_s3_label "$target"): ${BOLD}$(_retention_display "$new_val" days)${RESET}"
+}
+
+_schedule_status() {
+    local sched n
+    if [[ -n "$CRON_TIMES" ]]; then
+        sched="${GREEN}$(printf "$(t sum_schedule_utc)" "$CRON_TIMES")"
+    else
+        sched="${YELLOW}$(t sum_schedule_off)"
+    fi
+    print_aligned_rows "$(t sum_schedule):" "$sched"
+    echo ""
+    echo -e "   ${BOLD}$(t ret_heading)${RESET}"
+    local -a ret_rows=("$(t ret_on_server)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")
+    if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        while IFS= read -r n; do
+            ret_rows+=("$(_s3_label "$n"):" "$(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)")
+        done < <(_s3_configured_nums)
+    else
+        ret_rows+=("Telegram:" "$(t ret_tg_keep)")
+    fi
+    print_aligned_rows "${ret_rows[@]}"
+}
+
 _s3_configured_nums() {
     local count="${S3_COUNT:-1}"
     local i
@@ -2355,9 +2450,8 @@ s3_target_menu() {
                 print_message "SUCCESS" "$(t st_s3_prefix_ok)"
                 ;;
             8)
-                echo "   $(t st_retention_disable_hint)"
-                ui_input new_val "$(printf "$(t st_retention_enter_s3)" "$s3_retain")"
-                _s3_set RETAIN_DAYS "$s3_num" "${new_val:-$s3_retain}"
+                _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$s3_num")")" "$s3_retain"
+                _s3_set RETAIN_DAYS "$s3_num" "$new_val"
                 save_config
                 print_message "SUCCESS" "$(t st_retention_s3_ok)"
                 ;;
@@ -3084,15 +3178,17 @@ setup_auto_send() {
         clear
         echo -e "${GREEN}${BOLD}$(t cron_title)${RESET}"
         echo ""
-        if [[ -n "$CRON_TIMES" ]]; then
-            print_message "INFO" "$(t cron_on) ${BOLD}${CRON_TIMES}${RESET} $(t cron_utc)"
-        else
-            print_message "INFO" "$(t cron_off)"
-        fi
+        _schedule_status
         echo ""
         ui_menu_reset
         ui_menu_add 1 "$(t cron_enable)"
         ui_menu_add 2 "$(t cron_disable)"
+        ui_menu_gap
+        ui_menu_add 3 "$(t ret_menu_local)"
+        if [[ "$UPLOAD_METHOD" == "s3" ]] && [[ -n "$(_s3_configured_nums)" ]]; then
+            ui_menu_add 4 "$(t ret_menu_s3)"
+        fi
+        ui_menu_gap
         ui_menu_add 0 "$(t back_to_menu)"
         ui_menu_choose choice
         echo ""
@@ -3223,6 +3319,11 @@ setup_auto_send() {
                 CRON_TIMES="${user_friendly_times_local% }"
                 save_config
                 print_message "SUCCESS" "$(t cron_set) ${BOLD}${CRON_TIMES}${RESET} $(t cron_utc)"
+                ;;
+            3) _retention_set_local || continue ;;
+            4)
+                [[ "$UPLOAD_METHOD" == "s3" ]] || continue
+                _retention_set_s3 || continue
                 ;;
             2)
                 print_message "INFO" "$(t cron_disabling)"
@@ -4202,7 +4303,6 @@ configure_upload_method() {
         ui_menu_add 2 "$(t ul_set_s3)$([[ "$UPLOAD_METHOD" == "s3" ]] && echo "$cur_mark")"
         ui_menu_gap
         ui_menu_add 3 "$(t st_s3_settings)"
-        ui_menu_add 4 "$(t st_retention_settings)"
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
@@ -4210,7 +4310,6 @@ configure_upload_method() {
 
         case $choice in
             3) s3_settings_menu; continue ;;
-            4) settings_retention; continue ;;
             1)
                 UPLOAD_METHOD="telegram"
                 save_config
@@ -4412,95 +4511,6 @@ settings_telegram() {
         echo ""
         read -rp "$(t press_enter)"
     done
-}
-
-settings_retention() {
-    clear
-    echo -e "${GREEN}${BOLD}$(t st_retention_title)${RESET}"
-    echo ""
-    print_message "INFO" "$(t st_retention_local) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
-
-    local -a ret_s3_nums=()
-    while IFS= read -r ret_s3_num; do
-        local ret_s3_chk_bucket=$(_s3_var BUCKET "$ret_s3_num")
-        local ret_s3_chk_access=$(_s3_var ACCESS_KEY "$ret_s3_num")
-        local ret_s3_chk_secret=$(_s3_var SECRET_KEY "$ret_s3_num")
-        if [[ -z "$ret_s3_chk_bucket" || -z "$ret_s3_chk_access" || -z "$ret_s3_chk_secret" ]]; then
-            continue
-        fi
-        ret_s3_nums+=("$ret_s3_num")
-        local ret_s3_lbl=$(_s3_label "$ret_s3_num")
-        local ret_s3_days=$(_s3_var RETAIN_DAYS "$ret_s3_num")
-        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$ret_s3_days" "$(t st_retention_days)")${RESET} (${ret_s3_lbl})"
-    done < <(_s3_configured_nums)
-
-    echo ""
-    ui_menu_reset
-    ui_menu_add 1 "$(t st_retention_change_local)"
-    ui_menu_add 2 "$(t st_retention_change_s3)"
-    ui_menu_gap
-    ui_menu_add 0 "$(t back)"
-    ui_menu_choose ret_choice
-    echo ""
-
-    case $ret_choice in
-        1)
-            ui_menu_reset
-            ui_menu_add 1 "$(t st_retention_days)"
-            ui_menu_add 2 "$(t st_retention_hours)"
-            ui_menu_gap
-            ui_menu_add 0 "$(t back)"
-            ui_menu_choose unit_choice
-            case $unit_choice in
-                0) return ;;
-                1) RETAIN_BACKUPS_UNIT="days" ;;
-                2) RETAIN_BACKUPS_UNIT="hours" ;;
-            esac
-            echo "   $(t st_retention_disable_hint)"
-            ui_input new_local_ret "$(printf "$(t st_retention_enter_local)" "$RETAIN_BACKUPS_VALUE")"
-            RETAIN_BACKUPS_VALUE="${new_local_ret:-$RETAIN_BACKUPS_VALUE}"
-            save_config
-            print_message "SUCCESS" "$(t st_retention_local_ok) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
-            ;;
-
-        2)
-            local ret_target_num=""
-            if [[ "${#ret_s3_nums[@]}" -gt 1 ]]; then
-                echo "   $(t st_retention_pick_s3)"
-                local ri=0
-                local ret_pick_num
-                ui_menu_reset
-                for ret_pick_num in "${ret_s3_nums[@]}"; do
-                    ri=$((ri + 1))
-                    ui_menu_add "$ri" "$(_s3_label "$ret_pick_num")"
-                done
-                ui_menu_gap
-                ui_menu_add 0 "$(t back)"
-                local ret_pick_choice
-                ui_menu_choose ret_pick_choice
-                if [[ "$ret_pick_choice" =~ ^[0-9]+$ ]] && [[ "$ret_pick_choice" -ge 1 ]] && [[ "$ret_pick_choice" -le "${#ret_s3_nums[@]}" ]]; then
-                    ret_target_num="${ret_s3_nums[$((ret_pick_choice - 1))]}"
-                else
-                    return
-                fi
-            elif [[ "${#ret_s3_nums[@]}" -eq 1 ]]; then
-                ret_target_num="${ret_s3_nums[0]}"
-            fi
-
-            local ret_target_days
-            ret_target_days=$(_s3_var RETAIN_DAYS "$ret_target_num")
-            echo "   $(t st_retention_disable_hint)"
-            ui_input new_s3_ret "$(printf "$(t st_retention_enter_s3)" "$ret_target_days")"
-            _s3_set RETAIN_DAYS "$ret_target_num" "${new_s3_ret:-$ret_target_days}"
-            save_config
-            print_message "SUCCESS" "$(t st_retention_s3_ok) ${BOLD}$(_retention_display "$(_s3_var RETAIN_DAYS "$ret_target_num")" "$(t st_retention_days)")${RESET} ($(_s3_label "$ret_target_num"))"
-            ;;
-        0) return ;;
-        *) print_message "ERROR" "$(t invalid_input_select)" ;;
-    esac
-    unset ret_s3_nums
-    echo ""
-    read -rp "$(t press_enter)"
 }
 
 settings_language() {
@@ -5274,18 +5284,20 @@ show_status_card() {
     du=$(_disk_usage)
     if [[ -n "$du" ]]; then
         read -r used total <<< "$du"
-        rows+=("$(t usage_disk)" "$(_usage_color "$used" "$total")$(_usage_text "$used" "$total")")
+        rows+=("$(t usage_disk)" "$(_usage_color "$used" "$total")$(_usage_text "$used" "$total")${LIGHT_GRAY}$(printf "$(t usage_keep)" "$(_retention_short "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")")
     fi
     if [[ "$UPLOAD_METHOD" == "s3" ]]; then
+        local s3_keep
         while IFS= read -r s3_num; do
             s3_bytes=$(_s3_cached_usage "$s3_num")
             s3_limit=$(_s3_limit_bytes "$s3_num")
+            s3_keep="$(printf "$(t usage_keep)" "$(_retention_short "$(_s3_var RETAIN_DAYS "$s3_num")" days)")"
             if [[ -n "$s3_bytes" ]]; then
-                rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")")
+                rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")${LIGHT_GRAY}${s3_keep}")
             elif [[ -n "$s3_limit" ]]; then
-                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(printf "$(t usage_no_data_limit)" "$(_ui_human_size "$s3_limit")")")
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(printf "$(t usage_no_data_limit)" "$(_ui_human_size "$s3_limit")")${s3_keep}")
             else
-                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(t usage_no_data)")
+                rows+=("$(_s3_label "$s3_num")" "${LIGHT_GRAY}$(t usage_no_data)${s3_keep}")
             fi
         done < <(_s3_configured_nums)
     fi
