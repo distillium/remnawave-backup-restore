@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.11"
+VERSION="4.2.12"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -551,164 +551,6 @@ setup_symlink() {
     fi
     echo ""
     return 0
-}
-
-configure_bot_backup() {
-    while true; do
-        clear
-        echo -e "${GREEN}${BOLD}$(t bot_cfg_title)${RESET}"
-        echo ""
-        
-        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            local bot_mode_disp
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                bot_mode_disp="${RED}$(t bot_mode_only)"
-            else
-                bot_mode_disp="${GREEN}$(t bot_mode_panel_bot)"
-            fi
-            print_aligned_rows \
-                "$(t bot_label)" "${GREEN}${BOT_BACKUP_SELECTED}" \
-                "$(t bot_path_label)" "$BOT_BACKUP_PATH" \
-                "$(t bot_mode_label)" "$bot_mode_disp"
-        else
-            print_message "INFO" "$(t bot_backup_status) ${RED}${BOLD}$(t bot_disabled)${RESET}"
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                print_message "WARN" "$(t bot_warn_nothing)"
-            else
-                print_message "INFO" "$(t bot_panel_only_mode)"
-            fi
-        fi
-        echo ""
-        
-        ui_menu_reset
-        ui_menu_add 1 "$(t bot_menu_configure)"
-        
-        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            ui_menu_add 2 "$(t bot_menu_disable)"
-            
-            if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                if [[ "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    ui_menu_add 3 "$(t bot_menu_enable_panel)"
-                fi
-            else
-                ui_menu_add 3 "$(t bot_menu_exclude_panel)"
-            fi
-        fi
-
-        ui_menu_gap
-        ui_menu_add 0 "$(t back_to_menu)"
-        
-        ui_menu_choose choice
-        
-        case $choice in
-            1)
-                clear
-                echo -e "${GREEN}${BOLD}$(t bot_select_title)${RESET}"
-                echo ""
-                ui_menu_reset
-                ui_menu_add 1 "$(t bot_jesus)"
-                ui_menu_add 2 "$(t bot_jesus_priv)"
-                ui_menu_add 3 "$(t bot_machka)"
-                ui_menu_add 4 "$(t bot_snoups)"
-                ui_menu_add 5 "$(t bot_minishop)"
-                ui_menu_add 0 "$(t back)"
-                
-                local bot_choice
-                ui_menu_choose bot_choice
-                case "$bot_choice" in
-                    1) BOT_BACKUP_SELECTED="Бот от Иисуса"; bot_folder="remnawave-telegram-shop" ;;
-                    2) BOT_BACKUP_SELECTED="Приватный бот от Иисуса"; bot_folder="rwp-shop" ;;
-                    3) BOT_BACKUP_SELECTED="Бот от Мачки"; bot_folder="remnawave-tg-shop" ;;
-                    4) BOT_BACKUP_SELECTED="Бот от Snoups"; bot_folder="remnashop" ;;
-                    5) BOT_BACKUP_SELECTED="Бот Minishop"; bot_folder="remnawave-minishop" ;;
-                    0) continue ;;
-                    *) print_message "ERROR" "$(t invalid_input)"; sleep 1; continue ;;
-                esac
-                
-                echo ""
-                print_message "ACTION" "$(t bot_select_path)"
-                ui_menu_reset
-                ui_menu_add 1 "/opt/$bot_folder"
-                ui_menu_add 2 "/root/$bot_folder"
-                ui_menu_add 3 "/opt/stacks/$bot_folder"
-                ui_menu_add 4 "$(t custom_path)"
-                ui_menu_gap
-                ui_menu_add 0 "$(t back)"
-
-                local path_choice
-                ui_menu_choose path_choice
-                case "$path_choice" in
-                    0) continue ;;
-                    1) BOT_BACKUP_PATH="/opt/$bot_folder" ;;
-                    2) BOT_BACKUP_PATH="/root/$bot_folder" ;;
-                    3) BOT_BACKUP_PATH="/opt/stacks/$bot_folder" ;;
-                    4) 
-                        echo ""
-                        ui_input custom_bot_path "$(t bot_enter_path)" "/opt/my-bot"
-                        if [[ -z "$custom_bot_path" || ! "$custom_bot_path" = /* ]]; then
-                            print_message "ERROR" "$(t bot_path_absolute)"
-                            sleep 2; continue
-                        fi
-                        BOT_BACKUP_PATH="${custom_bot_path%/}" 
-                        ;;
-                    *) print_message "ERROR" "$(t invalid_input)"; sleep 1; continue ;;
-                esac
-
-                echo ""
-                ui_input bot_db_user "$(t bot_db_user)" "postgres"
-                BOT_BACKUP_DB_USER="${bot_db_user:-postgres}"
-
-                if [[ "$SKIP_PANEL_BACKUP" == "false" ]]; then
-                    echo ""
-                    ui_confirm only_bot_confirm "$(t bot_disable_panel)"
-                    if [[ "$only_bot_confirm" =~ ^[yY]$ ]]; then
-                        SKIP_PANEL_BACKUP="true"
-                    fi
-                fi
-
-                BOT_BACKUP_ENABLED="true"
-                save_config
-                print_message "SUCCESS" "$(t bot_saved)"
-                read -rp "$(t press_enter)"
-                ;;
-
-            2)
-                BOT_BACKUP_ENABLED="false"
-                BOT_BACKUP_PATH=""
-                BOT_BACKUP_SELECTED=""
-                
-                echo ""
-                print_message "SUCCESS" "$(t bot_turned_off)"
-
-                if [[ "$SKIP_PANEL_BACKUP" == "true" && "$REMNALABS_ROOT_DIR" != "none" && -n "$REMNALABS_ROOT_DIR" ]]; then
-                    print_message "WARN" "$(t bot_panel_also_off)"
-                    ui_confirm restore_p "$(t bot_enable_panel_back)"
-                    if [[ "$restore_p" =~ ^[yY]$ ]]; then
-                        SKIP_PANEL_BACKUP="false"
-                        print_message "SUCCESS" "$(t bot_panel_restored)"
-                    fi
-                fi
-                
-                save_config
-                read -rp "$(t press_enter)"
-                ;;
-
-            3)
-                if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-                    SKIP_PANEL_BACKUP="false"
-                    print_message "SUCCESS" "$(t bot_mode_to_panel_bot)"
-                else
-                    SKIP_PANEL_BACKUP="true"
-                    print_message "SUCCESS" "$(t bot_mode_to_only_bot)"
-                fi
-                save_config
-                read -rp "$(t press_enter)"
-                ;;
-
-            0) break ;;
-            *) print_message "ERROR" "$(t invalid_input)" ; sleep 1 ;;
-        esac
-    done
 }
 
 get_bot_params() {
@@ -1675,7 +1517,21 @@ load_or_create_config() {
                     *) print_message "ERROR" "$(t invalid_input)" ;;
                     esac
                 done
+                echo ""
+                local add_bot
+                ui_confirm add_bot "$(t cfg_add_bot)"
+                if [[ "$add_bot" == "y" ]]; then
+                    echo ""
+                    _bot_setup_wizard && BOT_BACKUP_ENABLED="true" || true
+                fi
+            else
+                if _bot_setup_wizard; then
+                    BOT_BACKUP_ENABLED="true"
+                else
+                    print_message "WARN" "$(t cfg_bot_later)"
+                fi
             fi
+            echo ""
 
             mkdir -p "$INSTALL_DIR"
             mkdir -p "$BACKUP_DIR"
@@ -2857,6 +2713,12 @@ _encryption_generate_keys() {
 create_backup() {
     LOG_CATEGORY="backup"
     log_write "INFO" "=== backup started (v${VERSION}) ==="
+    if [[ "$(_backup_mode)" == "none" ]]; then
+        print_message "ERROR" "$(t bk_nothing)"
+        log_write "ERROR" "nothing to back up: panel and bot are both off"
+        [[ -t 0 ]] || send_telegram_message "❌ $(t bk_nothing)" "None" || true
+        return 1
+    fi
     print_message "INFO" "$(t bk_starting)"
     echo ""
     
@@ -4552,209 +4414,6 @@ settings_telegram() {
     done
 }
 
-settings_panel_db() {
-    while true; do
-        clear
-        echo -e "${GREEN}${BOLD}$(t st_db_title)${RESET}"
-        echo ""
-        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-            print_message "INFO" "$(t st_db_type) ${BOLD}${GREEN}$(t st_db_type_ext)${RESET}"
-            print_message "INFO" "$(t st_db_host_label) ${BOLD}${DB_HOST:-$(t not_set)}${RESET}"
-            print_message "INFO" "$(t st_db_port_label) ${BOLD}${DB_PORT}${RESET}"
-            print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-            print_message "INFO" "$(t st_db_name_label) ${BOLD}${DB_NAME}${RESET}"
-            print_message "INFO" "$(t st_db_ssl_label) ${BOLD}${DB_SSL_MODE}${RESET}"
-            print_message "INFO" "$(t st_db_pgver_label) ${BOLD}${DB_POSTGRES_VERSION}${RESET}"
-        else
-            print_message "INFO" "$(t st_db_type) ${BOLD}${GREEN}$(t st_db_type_docker)${RESET} (remnawave-db)"
-            print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-        fi
-        echo ""
-        ui_menu_reset
-        ui_menu_add 1 "$(t st_db_change_type)"
-        ui_menu_add 2 "$(t st_db_change_user)"
-        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-            ui_menu_add 3 "$(t st_db_ext_settings)"
-            ui_menu_add 4 "$(t st_db_test)"
-        fi
-        ui_menu_gap
-        ui_menu_add 0 "$(t back)"
-        ui_menu_choose db_choice
-        echo ""
-
-        case $db_choice in
-            1)
-                echo "$(t st_db_select_type)"
-                ui_menu_reset
-                ui_menu_add 1 "$(t st_db_docker)"
-                ui_menu_add 2 "$(t st_db_external)"
-                ui_menu_gap
-                ui_menu_add 0 "$(t back)"
-                ui_menu_choose conn_type_choice
-                case "$conn_type_choice" in
-                    0) continue ;;
-                    1)
-                        DB_CONNECTION_TYPE="docker"
-                        save_config
-                        print_message "SUCCESS" "$(t st_db_switched_docker)"
-                        ;;
-                    2)
-                        DB_CONNECTION_TYPE="external"
-                        if [[ -z "$DB_HOST" ]]; then
-                            echo ""
-                            print_message "ACTION" "$(t st_db_need_ext_params)"
-                            echo ""
-                            ui_input DB_HOST "$(t rs_host)" "db.example.com"
-                            ui_input input_db_port "$(t rs_port)"
-                            DB_PORT="${input_db_port:-5432}"
-                            ui_input input_db_name "$(t rs_dbname)"
-                            DB_NAME="${input_db_name:-postgres}"
-                            ui_secret DB_PASSWORD "$(t rs_pass)"
-                            ui_input input_ssl "$(t rs_ssl)"
-                            DB_SSL_MODE="${input_ssl:-prefer}"
-                            ui_input input_pg_ver "$(t rs_pgver)"
-                            DB_POSTGRES_VERSION="${input_pg_ver:-17}"
-                        fi
-                        save_config
-                        print_message "SUCCESS" "$(t st_db_switched_ext)"
-                        ;;
-                    *)
-                        print_message "ERROR" "$(t invalid_input)"
-                        ;;
-                esac
-                ;;
-            2)
-                print_message "INFO" "$(t st_db_user_label) ${BOLD}${DB_USER}${RESET}"
-                echo ""
-                ui_input NEW_DB_USER "$(printf "$(t st_db_enter_user)" "$DB_USER")"
-                DB_USER="${NEW_DB_USER:-postgres}"
-                save_config
-                print_message "SUCCESS" "$(t st_db_user_ok) ${BOLD}${DB_USER}${RESET}."
-                ;;
-            3)
-                if [[ "$DB_CONNECTION_TYPE" != "external" ]]; then
-                    print_message "ERROR" "$(t invalid_input)"
-                else
-                    clear
-                    echo -e "${GREEN}${BOLD}$(t st_db_ext_settings)${RESET}"
-                    echo ""
-                    print_message "INFO" "$(t st_db_host_label) ${BOLD}${DB_HOST:-$(t not_set)}${RESET}"
-                    print_message "INFO" "$(t st_db_port_label) ${BOLD}${DB_PORT}${RESET}"
-                    print_message "INFO" "$(t st_db_name_label) ${BOLD}${DB_NAME}${RESET}"
-                    print_message "INFO" "$(t st_db_ssl_label) ${BOLD}${DB_SSL_MODE}${RESET}"
-                    print_message "INFO" "$(t st_db_pgver_label) ${BOLD}${DB_POSTGRES_VERSION}${RESET}"
-                    echo ""
-                    ui_input new_host "$(printf "$(t st_db_enter_host)" "$DB_HOST")"
-                    [[ -n "$new_host" ]] && DB_HOST="$new_host"
-                    ui_input new_port "$(printf "$(t st_db_enter_port)" "$DB_PORT")"
-                    [[ -n "$new_port" ]] && DB_PORT="$new_port"
-                    ui_input new_dbname "$(printf "$(t st_db_enter_name)" "$DB_NAME")"
-                    [[ -n "$new_dbname" ]] && DB_NAME="$new_dbname"
-                    ui_secret new_pass "$(t st_db_enter_pass)"
-                    [[ -n "$new_pass" ]] && DB_PASSWORD="$new_pass"
-                    ui_input new_ssl "$(printf "$(t st_db_enter_ssl)" "$DB_SSL_MODE")"
-                    [[ -n "$new_ssl" ]] && DB_SSL_MODE="$new_ssl"
-                    ui_input new_pgver "$(printf "$(t st_db_enter_pgver)" "$DB_POSTGRES_VERSION")"
-                    [[ -n "$new_pgver" ]] && DB_POSTGRES_VERSION="$new_pgver"
-                    
-                    save_config
-                    print_message "SUCCESS" "$(t st_db_ext_saved)"
-                fi
-                ;;
-            4)
-                if [[ "$DB_CONNECTION_TYPE" != "external" ]]; then
-                    print_message "ERROR" "$(t st_db_only_ext)"
-                else
-                    print_message "INFO" "$(t st_db_testing) ${BOLD}${DB_HOST}:${DB_PORT}${RESET}..."
-                    local pg_image=$(get_postgres_image)
-                    
-                    if docker run --rm --network host \
-                        -e PGPASSWORD="$DB_PASSWORD" \
-                        -e PGSSLMODE="$DB_SSL_MODE" \
-                        "$pg_image" \
-                        pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" 2>/dev/null; then
-                        print_message "SUCCESS" "$(t st_db_test_ok)"
-                    else
-                        print_message "ERROR" "$(t st_db_test_fail)"
-                    fi
-                fi
-                ;;
-            0) break ;;
-            *) print_message "ERROR" "$(t invalid_input)" ;;
-        esac
-        echo ""
-        read -rp "$(t press_enter)"
-    done
-}
-
-settings_panel_path() {
-    clear
-    echo -e "${GREEN}${BOLD}$(t st_path_title)${RESET}"
-    echo ""
-    print_message "INFO" "$(t st_path_current) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-    echo ""
-    print_message "ACTION" "$(t st_path_select)"
-    ui_menu_reset
-    ui_menu_add 1 "/opt/remnawave"
-    ui_menu_add 2 "/root/remnawave"
-    ui_menu_add 3 "/opt/stacks/remnawave"
-    ui_menu_add 4 "$(t custom_path)"
-    ui_menu_gap
-    ui_menu_add 0 "$(t back)"
-
-    local new_remnawave_path_choice
-    while true; do
-        ui_menu_choose new_remnawave_path_choice
-        case "$new_remnawave_path_choice" in
-        1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
-        2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
-        3) REMNALABS_ROOT_DIR="/opt/stacks/remnawave"; break ;;
-        4) 
-            echo ""
-            print_message "INFO" "$(t st_path_enter)"
-            ui_input new_custom_remnawave_path "$(t path_prompt)" "/opt/remnawave"
-            if [[ -z "$new_custom_remnawave_path" ]]; then
-                print_message "ERROR" "$(t cfg_path_empty)"
-                echo ""
-                read -rp "$(t press_enter)"
-                continue
-            fi
-
-            if [[ ! "$new_custom_remnawave_path" = /* ]]; then
-                print_message "ERROR" "$(t cfg_path_abs)"
-                echo ""
-                read -rp "$(t press_enter)"
-                continue
-            fi
-
-            new_custom_remnawave_path="${new_custom_remnawave_path%/}"
-
-            if [[ ! -d "$new_custom_remnawave_path" ]]; then
-                print_message "WARN" "$(t st_path_missing) ${BOLD}${new_custom_remnawave_path}${RESET}"
-                ui_confirm confirm_new_custom_path "$(t st_path_continue)"
-                if [[ "$confirm_new_custom_path" != "y" ]]; then
-                    echo ""
-                    read -rp "$(t press_enter)"
-                    continue
-                fi
-            fi
-
-            REMNALABS_ROOT_DIR="$new_custom_remnawave_path"
-            print_message "SUCCESS" "$(t st_path_set) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-            break 
-            ;;
-        0) 
-            return
-            ;;
-        *) print_message "ERROR" "$(t invalid_input)" ;;
-        esac
-    done
-    save_config
-    print_message "SUCCESS" "$(t st_path_ok) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
-    echo ""
-    read -rp "$(t press_enter)"
-}
-
 settings_retention() {
     clear
     echo -e "${GREEN}${BOLD}$(t st_retention_title)${RESET}"
@@ -4916,40 +4575,466 @@ configure_settings() {
     done
 }
 
-menu_what_to_backup() {
+_bot_folder_for() {
+    case "$1" in
+        "Бот от Иисуса") echo "remnawave-telegram-shop" ;;
+        "Приватный бот от Иисуса") echo "rwp-shop" ;;
+        "Бот от Мачки") echo "remnawave-tg-shop" ;;
+        "Бот от Snoups") echo "remnashop" ;;
+        "Бот Minishop") echo "remnawave-minishop" ;;
+        *) echo "bot" ;;
+    esac
+}
+
+_panel_configured() { [[ -n "$REMNALABS_ROOT_DIR" && "$REMNALABS_ROOT_DIR" != "none" ]]; }
+_bot_configured() { [[ -n "$BOT_BACKUP_SELECTED" && -n "$BOT_BACKUP_PATH" ]]; }
+
+_backup_mode() {
+    if [[ "$SKIP_PANEL_BACKUP" != "true" ]]; then
+        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then echo both; else echo panel; fi
+    else
+        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then echo bot; else echo none; fi
+    fi
+}
+
+_backup_mode_label() {
+    case "$1" in
+        both) t bm_both ;;
+        panel) t bm_panel ;;
+        bot) t bm_bot ;;
+        *) t bm_none ;;
+    esac
+}
+
+_confirm_missing_dir() {
+    local _cmd_ans
+    [[ -d "$1" ]] && return 0
+    print_message "WARN" "$(t st_path_missing) ${BOLD}$1${RESET}"
+    ui_confirm _cmd_ans "$(t st_path_continue)"
+    [[ "$_cmd_ans" == "y" ]]
+}
+
+_panel_pick_path() {
+    local _pp_choice _pp_path
+    print_message "ACTION" "$(t st_path_select)"
+    ui_menu_reset
+    ui_menu_add 1 "/opt/remnawave"
+    ui_menu_add 2 "/root/remnawave"
+    ui_menu_add 3 "/opt/stacks/remnawave"
+    ui_menu_add 4 "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    while true; do
+        ui_menu_choose _pp_choice
+        case "$_pp_choice" in
+            1) _pp_path="/opt/remnawave" ;;
+            2) _pp_path="/root/remnawave" ;;
+            3) _pp_path="/opt/stacks/remnawave" ;;
+            4)
+                echo ""
+                ui_input _pp_path "$(t st_path_enter)" "/opt/remnawave"
+                if [[ -z "$_pp_path" || "$_pp_path" != /* ]]; then
+                    print_message "ERROR" "$(t cfg_path_abs)"
+                    continue
+                fi
+                _pp_path="${_pp_path%/}"
+                ;;
+            0) return 1 ;;
+            *) continue ;;
+        esac
+        _confirm_missing_dir "$_pp_path" || continue
+        printf -v "$1" '%s' "$_pp_path"
+        return 0
+    done
+}
+
+_bot_pick() {
+    local _bp_choice
+    print_message "ACTION" "$(t bot_select_title)"
+    ui_menu_reset
+    ui_menu_add 1 "$(t bot_jesus)"
+    ui_menu_add 2 "$(t bot_jesus_priv)"
+    ui_menu_add 3 "$(t bot_machka)"
+    ui_menu_add 4 "$(t bot_snoups)"
+    ui_menu_add 5 "$(t bot_minishop)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose _bp_choice
+    case "$_bp_choice" in
+        1) printf -v "$1" '%s' "Бот от Иисуса" ;;
+        2) printf -v "$1" '%s' "Приватный бот от Иисуса" ;;
+        3) printf -v "$1" '%s' "Бот от Мачки" ;;
+        4) printf -v "$1" '%s' "Бот от Snoups" ;;
+        5) printf -v "$1" '%s' "Бот Minishop" ;;
+        *) return 1 ;;
+    esac
+}
+
+_bot_pick_path() {
+    local _bpp_folder _bpp_choice _bpp_path
+    _bpp_folder=$(_bot_folder_for "$2")
+    print_message "ACTION" "$(t bot_select_path)"
+    ui_menu_reset
+    ui_menu_add 1 "/opt/$_bpp_folder"
+    ui_menu_add 2 "/root/$_bpp_folder"
+    ui_menu_add 3 "/opt/stacks/$_bpp_folder"
+    ui_menu_add 4 "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    while true; do
+        ui_menu_choose _bpp_choice
+        case "$_bpp_choice" in
+            1) _bpp_path="/opt/$_bpp_folder" ;;
+            2) _bpp_path="/root/$_bpp_folder" ;;
+            3) _bpp_path="/opt/stacks/$_bpp_folder" ;;
+            4)
+                echo ""
+                ui_input _bpp_path "$(t bot_enter_path)" "/opt/$_bpp_folder"
+                if [[ -z "$_bpp_path" || "$_bpp_path" != /* ]]; then
+                    print_message "ERROR" "$(t bot_path_absolute)"
+                    continue
+                fi
+                _bpp_path="${_bpp_path%/}"
+                ;;
+            0) return 1 ;;
+            *) continue ;;
+        esac
+        _confirm_missing_dir "$_bpp_path" || continue
+        printf -v "$1" '%s' "$_bpp_path"
+        return 0
+    done
+}
+
+_bot_setup_wizard() {
+    local _bw_name _bw_path _bw_user
+    _bot_pick _bw_name || return 1
+    echo ""
+    _bot_pick_path _bw_path "$_bw_name" || return 1
+    echo ""
+    ui_input _bw_user "$(t bot_db_user)" "postgres"
+    BOT_BACKUP_SELECTED="$_bw_name"
+    BOT_BACKUP_PATH="$_bw_path"
+    BOT_BACKUP_DB_USER="${_bw_user:-postgres}"
+    return 0
+}
+
+backup_mode_menu() {
+    local cur choice want
     while true; do
         clear
-        echo -e "${GREEN}${BOLD}$(t wb_title)${RESET}"
+        echo -e "${GREEN}${BOLD}$(t bm_title)${RESET}"
+        echo ""
+        cur=$(_backup_mode)
+        print_aligned_rows "$(t bm_current)" "$(_backup_mode_label "$cur")"
+        echo ""
+        ui_menu_reset
+        local m n=1
+        for m in both panel bot; do
+            if [[ "$m" == "$cur" ]]; then
+                ui_menu_add "$n" "$(_backup_mode_label "$m") ${GREEN}✓ $(t ul_current_mark)${RESET}"
+            else
+                ui_menu_add "$n" "$(_backup_mode_label "$m")"
+            fi
+            n=$((n + 1))
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        case "$choice" in
+            1) want=both ;;
+            2) want=panel ;;
+            3) want=bot ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        [[ "$want" == "$cur" ]] && return
+        echo ""
+
+        if [[ "$want" != "bot" ]] && ! _panel_configured; then
+            local new_path
+            print_message "INFO" "$(t bm_need_panel)"
+            _panel_pick_path new_path || continue
+            REMNALABS_ROOT_DIR="$new_path"
+            DB_USER="${DB_USER:-postgres}"
+            echo ""
+        fi
+        if [[ "$want" != "panel" ]] && ! _bot_configured; then
+            print_message "INFO" "$(t bm_need_bot)"
+            _bot_setup_wizard || continue
+            echo ""
+        fi
+
+        case "$want" in
+            both)  SKIP_PANEL_BACKUP="false"; BOT_BACKUP_ENABLED="true" ;;
+            panel) SKIP_PANEL_BACKUP="false"; BOT_BACKUP_ENABLED="false" ;;
+            bot)   SKIP_PANEL_BACKUP="true";  BOT_BACKUP_ENABLED="true" ;;
+        esac
+        save_config
+        return
+    done
+}
+
+settings_panel() {
+    local choice
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t pn_title)${RESET}"
         echo ""
         if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
-            print_message "INFO" "$(t wb_panel) ${BOLD}${YELLOW}$(t wb_panel_off)${RESET}"
-        else
-            print_message "INFO" "$(t wb_panel) ${BOLD}${GREEN}$(t wb_on)${RESET} · ${REMNALABS_ROOT_DIR:-$(t not_set)}"
-            if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
-                print_message "INFO" "$(t wb_panel_db) ${BOLD}$(printf "$(t sum_db_ext)" "${DB_HOST}:${DB_PORT}")${RESET}"
-            else
-                print_message "INFO" "$(t wb_panel_db) ${BOLD}$(t sum_db_docker)${RESET}"
-            fi
+            print_message "WARN" "$(t pn_off_note)"
+            echo ""
         fi
-        if [[ "$BOT_BACKUP_ENABLED" == "true" ]]; then
-            print_message "INFO" "$(t wb_bot) ${BOLD}${GREEN}${BOT_BACKUP_SELECTED}${RESET} · ${BOT_BACKUP_PATH}"
+        local path_disp="${REMNALABS_ROOT_DIR}"
+        _panel_configured || path_disp="${YELLOW}$(t not_set)"
+        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            print_aligned_rows \
+                "$(t pn_path)" "$path_disp" \
+                "$(t st_db_type)" "$(t st_db_type_ext)" \
+                "$(t st_db_host_label)" "${DB_HOST:-$(t not_set)}:${DB_PORT}" \
+                "$(t st_db_name_label)" "$DB_NAME" \
+                "$(t st_db_user_label)" "$DB_USER" \
+                "$(t st_db_ssl_label)" "$DB_SSL_MODE" \
+                "$(t st_db_pgver_label)" "$DB_POSTGRES_VERSION"
         else
-            print_message "INFO" "$(t wb_bot) ${BOLD}$(t sum_bot_off)${RESET}"
+            print_aligned_rows \
+                "$(t pn_path)" "$path_disp" \
+                "$(t st_db_type)" "$(t st_db_type_docker) (remnawave-db)" \
+                "$(t st_db_user_label)" "$DB_USER"
         fi
         echo ""
         ui_menu_reset
-        ui_menu_add 1 "$(t wb_panel_path)"
-        ui_menu_add 2 "$(t wb_panel_db_settings)"
-        ui_menu_add 3 "$(t wb_bot_settings)"
+        ui_menu_add 1 "$(t pn_change_path)"
+        ui_menu_add 2 "$(t st_db_change_type)"
+        ui_menu_add 3 "$(t st_db_change_user)"
+        if [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            ui_menu_add 4 "$(t st_db_ext_settings)"
+            ui_menu_add 5 "$(t st_db_test)"
+        fi
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
         echo ""
+
         case $choice in
-            1) settings_panel_path ;;
-            2) settings_panel_db ;;
-            3) configure_bot_backup ;;
-            0) break ;;
+            1)
+                local new_path
+                _panel_pick_path new_path || continue
+                REMNALABS_ROOT_DIR="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t st_path_ok) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                ;;
+            2)
+                local conn_type_choice
+                print_message "ACTION" "$(t st_db_select_type)"
+                ui_menu_reset
+                ui_menu_add 1 "$(t st_db_docker)"
+                ui_menu_add 2 "$(t st_db_external)"
+                ui_menu_gap
+                ui_menu_add 0 "$(t back)"
+                ui_menu_choose conn_type_choice
+                case "$conn_type_choice" in
+                    1)
+                        DB_CONNECTION_TYPE="docker"
+                        save_config
+                        print_message "SUCCESS" "$(t st_db_switched_docker)"
+                        ;;
+                    2)
+                        DB_CONNECTION_TYPE="external"
+                        if [[ -z "$DB_HOST" ]]; then
+                            echo ""
+                            print_message "ACTION" "$(t st_db_need_ext_params)"
+                            echo ""
+                            local input_db_port input_db_name input_ssl input_pg_ver
+                            ui_input DB_HOST "$(t rs_host)" "db.example.com"
+                            ui_input input_db_port "$(t rs_port)" "5432"
+                            DB_PORT="${input_db_port:-5432}"
+                            ui_input input_db_name "$(t rs_dbname)" "postgres"
+                            DB_NAME="${input_db_name:-postgres}"
+                            ui_secret DB_PASSWORD "$(t rs_pass)"
+                            ui_input input_ssl "$(t rs_ssl)" "prefer"
+                            DB_SSL_MODE="${input_ssl:-prefer}"
+                            ui_input input_pg_ver "$(t rs_pgver)" "17"
+                            DB_POSTGRES_VERSION="${input_pg_ver:-17}"
+                        fi
+                        save_config
+                        print_message "SUCCESS" "$(t st_db_switched_ext)"
+                        ;;
+                    *) continue ;;
+                esac
+                ;;
+            3)
+                local new_db_user
+                ui_input new_db_user "$(printf "$(t st_db_enter_user)" "$DB_USER")" "$DB_USER"
+                DB_USER="${new_db_user:-$DB_USER}"
+                save_config
+                print_message "SUCCESS" "$(t st_db_user_ok) ${BOLD}${DB_USER}${RESET}"
+                ;;
+            4)
+                [[ "$DB_CONNECTION_TYPE" == "external" ]] || continue
+                local new_host new_port new_dbname new_pass new_ssl new_pgver
+                ui_input new_host "$(printf "$(t st_db_enter_host)" "$DB_HOST")" "$DB_HOST"
+                [[ -n "$new_host" ]] && DB_HOST="$new_host"
+                ui_input new_port "$(printf "$(t st_db_enter_port)" "$DB_PORT")" "$DB_PORT"
+                [[ -n "$new_port" ]] && DB_PORT="$new_port"
+                ui_input new_dbname "$(printf "$(t st_db_enter_name)" "$DB_NAME")" "$DB_NAME"
+                [[ -n "$new_dbname" ]] && DB_NAME="$new_dbname"
+                ui_secret new_pass "$(t st_db_enter_pass)"
+                [[ -n "$new_pass" ]] && DB_PASSWORD="$new_pass"
+                ui_input new_ssl "$(printf "$(t st_db_enter_ssl)" "$DB_SSL_MODE")" "$DB_SSL_MODE"
+                [[ -n "$new_ssl" ]] && DB_SSL_MODE="$new_ssl"
+                ui_input new_pgver "$(printf "$(t st_db_enter_pgver)" "$DB_POSTGRES_VERSION")" "$DB_POSTGRES_VERSION"
+                [[ -n "$new_pgver" ]] && DB_POSTGRES_VERSION="$new_pgver"
+                save_config
+                print_message "SUCCESS" "$(t st_db_ext_saved)"
+                ;;
+            5)
+                [[ "$DB_CONNECTION_TYPE" == "external" ]] || continue
+                local pg_image
+                pg_image=$(get_postgres_image)
+                ui_spin_start "$(t st_db_testing) ${BOLD}${DB_HOST}:${DB_PORT}${RESET}"
+                if docker run --rm --network host \
+                    -e PGPASSWORD="$DB_PASSWORD" \
+                    -e PGSSLMODE="$DB_SSL_MODE" \
+                    "$pg_image" \
+                    pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1; then
+                    print_message "SUCCESS" "$(t st_db_test_ok)"
+                else
+                    print_message "ERROR" "$(t st_db_test_fail)"
+                fi
+                ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+settings_bot() {
+    local choice
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t bot_cfg_title)${RESET}"
+        echo ""
+        if ! _bot_configured; then
+            print_message "INFO" "$(t bot_not_set_note)"
+            echo ""
+            ui_menu_reset
+            ui_menu_add 1 "$(t bot_menu_setup)" primary
+            ui_menu_gap
+            ui_menu_add 0 "$(t back)"
+            ui_menu_choose choice
+            echo ""
+            case "$choice" in
+                1)
+                    _bot_setup_wizard || continue
+                    BOT_BACKUP_ENABLED="true"
+                    save_config
+                    echo ""
+                    print_message "SUCCESS" "$(printf "$(t bot_setup_done)" "$(_backup_mode_label "$(_backup_mode)")")"
+                    echo ""
+                    read -rp "$(t press_enter)"
+                    ;;
+                0) return ;;
+            esac
+            continue
+        fi
+
+        if [[ "$BOT_BACKUP_ENABLED" != "true" ]]; then
+            print_message "WARN" "$(t bot_off_note)"
+            echo ""
+        fi
+        print_aligned_rows \
+            "$(t bot_label)" "${GREEN}${BOT_BACKUP_SELECTED}" \
+            "$(t bot_path_label)" "$BOT_BACKUP_PATH" \
+            "$(t bot_db_user_label)" "$BOT_BACKUP_DB_USER"
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t bot_menu_change)"
+        ui_menu_add 2 "$(t bot_menu_path)"
+        ui_menu_add 3 "$(t bot_menu_db_user)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        echo ""
+        case "$choice" in
+            1)
+                local new_bot new_path
+                _bot_pick new_bot || continue
+                echo ""
+                _bot_pick_path new_path "$new_bot" || continue
+                BOT_BACKUP_SELECTED="$new_bot"
+                BOT_BACKUP_PATH="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t bot_changed) ${BOLD}${BOT_BACKUP_SELECTED}${RESET}"
+                ;;
+            2)
+                local new_path
+                _bot_pick_path new_path "$BOT_BACKUP_SELECTED" || continue
+                BOT_BACKUP_PATH="$new_path"
+                save_config
+                print_message "SUCCESS" "$(t bot_path_changed) ${BOLD}${BOT_BACKUP_PATH}${RESET}"
+                ;;
+            3)
+                local new_user
+                ui_input new_user "$(t bot_db_user)" "$BOT_BACKUP_DB_USER"
+                BOT_BACKUP_DB_USER="${new_user:-$BOT_BACKUP_DB_USER}"
+                save_config
+                print_message "SUCCESS" "$(t bot_db_user_changed) ${BOLD}${BOT_BACKUP_DB_USER}${RESET}"
+                ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+menu_what_to_backup() {
+    local choice mode panel_val bot_val
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t wb_title)${RESET}"
+        echo ""
+        mode=$(_backup_mode)
+
+        if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
+            panel_val="${LIGHT_GRAY}$(t wb_not_included)"
+        elif ! _panel_configured; then
+            panel_val="${YELLOW}$(t wb_not_set)"
+        elif [[ "$DB_CONNECTION_TYPE" == "external" ]]; then
+            panel_val="${REMNALABS_ROOT_DIR} · $(printf "$(t sum_db_ext)" "${DB_HOST}:${DB_PORT}")"
+        else
+            panel_val="${REMNALABS_ROOT_DIR} · $(t sum_db_docker)"
+        fi
+
+        if ! _bot_configured; then
+            bot_val="${LIGHT_GRAY}$(t wb_not_set)"
+        elif [[ "$BOT_BACKUP_ENABLED" != "true" ]]; then
+            bot_val="${LIGHT_GRAY}$(t wb_not_included) · ${BOT_BACKUP_SELECTED}"
+        else
+            bot_val="${BOT_BACKUP_SELECTED} · ${BOT_BACKUP_PATH}"
+        fi
+
+        local mode_val="${GREEN}$(_backup_mode_label "$mode")"
+        [[ "$mode" == "none" ]] && mode_val="${RED}$(_backup_mode_label none)"
+        print_aligned_rows \
+            "$(t wb_mode)" "$mode_val" \
+            "$(t wb_panel)" "$panel_val" \
+            "$(t wb_bot)" "$bot_val"
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t wb_menu_panel)"
+        ui_menu_add 2 "$(t wb_menu_bot)"
+        ui_menu_add 3 "$(t wb_menu_mode)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        case $choice in
+            1) settings_panel ;;
+            2) settings_bot ;;
+            3) backup_mode_menu ;;
+            0) return ;;
         esac
     done
 }
@@ -5168,19 +5253,22 @@ show_status_card() {
         *) up_val="${BOLD}$(t sum_upload_tg)" ;;
     esac
 
-    if [[ "$BOT_BACKUP_ENABLED" == "true" && -n "$BOT_BACKUP_SELECTED" ]]; then
-        bot_val="${BOLD}${BOT_BACKUP_SELECTED}"
-    else
-        bot_val="$(t sum_bot_off)"
-    fi
+    case "$(_backup_mode)" in
+        both)  bot_val="${BOLD}$(t bm_panel_short) + ${BOT_BACKUP_SELECTED}" ;;
+        panel) bot_val="${BOLD}$(t bm_panel)" ;;
+        bot)   bot_val="${BOLD}${BOT_BACKUP_SELECTED}" ;;
+        *)     bot_val="${RED}$(t bm_none)" ;;
+    esac
 
     local -a rows=(
-        "$(t sum_db)" "$db_val"
+        "$(t sum_what)" "$bot_val"
+    )
+    [[ "$SKIP_PANEL_BACKUP" != "true" ]] && rows+=("$(t sum_db)" "$db_val")
+    rows+=(
         "$(t sum_last_backup)" "$last_val"
         "$(t sum_schedule)" "$sched_val"
         "$(t sum_encryption)" "$enc_val"
         "$(t sum_upload)" "$up_val"
-        "$(t sum_bot)" "$bot_val"
     )
     local du used total s3_num s3_bytes s3_limit
     du=$(_disk_usage)
@@ -5236,7 +5324,7 @@ main_menu() {
         ui_menu_choose choice "${choice:-}"
         echo ""
         case $choice in
-            1) create_backup ; read -rp "$(t press_enter)" ;;
+            1) create_backup || true; read -rp "$(t press_enter)" ;;
             2) restore_backup ;;
             3) menu_what_to_backup ;;
             4) configure_upload_method ;;
