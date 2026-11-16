@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.13"
+VERSION="4.2.14"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -1916,17 +1916,25 @@ _s3_label() {
     fi
 }
 
+_plural() {
+    local n=$(( 10#$1 % 100 )) m=$(( 10#$1 % 10 ))
+    if [[ "$LANG_CODE" == "en" ]]; then
+        if [[ "$1" == "1" ]]; then echo "$2"; else echo "$4"; fi
+    elif (( n >= 11 && n <= 14 )); then echo "$4"
+    elif (( m == 1 )); then echo "$2"
+    elif (( m >= 2 && m <= 4 )); then echo "$3"
+    else echo "$4"
+    fi
+}
+
 _retention_display() {
-    local value="$1"
-    local unit="$2"
-    case "$unit" in
-        days) unit="$(t st_retention_days)" ;;
-        hours) unit="$(t st_retention_hours)" ;;
-    esac
-    if [[ "${value:-0}" -le 0 ]]; then
+    local value="${1:-0}" unit="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -le 0 ]]; then
         printf '%s' "$(t st_retention_value_disabled)"
+    elif [[ "$unit" == "hours" ]]; then
+        printf '%s %s' "$value" "$(_plural "$value" "$(t ret_hours_1)" "$(t ret_hours_2)" "$(t ret_hours_5)")"
     else
-        printf '%s %s' "$value" "$unit"
+        printf '%s %s' "$value" "$(_plural "$value" "$(t ret_days_1)" "$(t ret_days_2)" "$(t ret_days_5)")"
     fi
 }
 
@@ -2371,7 +2379,7 @@ s3_target_menu() {
         print_message "INFO" "$(t st_s3_access) ${BOLD}${s3_access:+****${s3_access: -4}}${RESET}"
         print_message "INFO" "$(t st_s3_secret) ${BOLD}${s3_secret:+****}${RESET}"
         print_message "INFO" "$(t st_s3_prefix) ${BOLD}${s3_prefix:-$(t root_folder)}${RESET}"
-        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" "$(t st_retention_days)")${RESET}"
+        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" days)${RESET}"
         local s3_limit_gb s3_used_cached
         s3_limit_gb=$(_s3_var LIMIT_GB "$s3_num")
         if [[ "$s3_limit_gb" =~ ^[0-9]+$ && "$s3_limit_gb" -gt 0 ]]; then
@@ -3082,7 +3090,7 @@ METAEOF
     if [[ "${RETAIN_BACKUPS_VALUE:-0}" -le 0 ]]; then
         print_message "INFO" "$(t bk_retention_disabled)"
     else
-        print_message "INFO" "$(printf "$(t bk_retention)" "$RETAIN_BACKUPS_VALUE")"
+        print_message "INFO" "$(printf "$(t bk_retention)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")"
         if [[ "$RETAIN_BACKUPS_UNIT" == "hours" ]]; then
             find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -mmin +$((RETAIN_BACKUPS_VALUE * 60)) -delete
         else
@@ -3107,7 +3115,7 @@ METAEOF
                 print_message "INFO" "$(t bk_retention_disabled) (${s3_ret_lbl})"
                 continue
             fi
-            print_message "INFO" "$(printf "$(t bk_s3_retention)" "$s3_ret_days") (${s3_ret_lbl})"
+            print_message "INFO" "$(printf "$(t bk_s3_retention)" "$(_retention_display "$s3_ret_days" days)") (${s3_ret_lbl})"
             cleanup_s3_old_backups "$s3_ret_num"
         done < <(_s3_configured_nums)
         print_message "SUCCESS" "$(t bk_s3_retention_ok)"
@@ -3185,7 +3193,7 @@ setup_auto_send() {
         ui_menu_add 2 "$(t cron_disable)"
         ui_menu_gap
         ui_menu_add 3 "$(t ret_menu_local)"
-        if [[ "$UPLOAD_METHOD" == "s3" ]] && [[ -n "$(_s3_configured_nums)" ]]; then
+        if [[ "$UPLOAD_METHOD" == "s3" ]]; then
             ui_menu_add 4 "$(t ret_menu_s3)"
         fi
         ui_menu_gap
@@ -4354,8 +4362,7 @@ configure_upload_method() {
                     ui_input S3_PREFIX "$(t ul_s3_enter_prefix)" "server-1"
                     echo ""
                     print_message "INFO" "$(t ul_s3_retain_info)"
-                    ui_input input_s3_retain "$(printf "$(t ul_s3_enter_retain)" "$S3_RETAIN_DAYS")"
-                    S3_RETAIN_DAYS="${input_s3_retain:-$S3_RETAIN_DAYS}"
+                    _ask_retention S3_RETAIN_DAYS "$(t ul_s3_enter_retain)" "$S3_RETAIN_DAYS"
                     
                     if [[ -z "$S3_ACCESS_KEY" || -z "$S3_SECRET_KEY" || -z "$S3_BUCKET" ]]; then
                         print_message "ERROR" "$(t ul_s3_fail)"
