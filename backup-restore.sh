@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.15"
+VERSION="4.2.16"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -4317,7 +4317,7 @@ _restore_backup_run() {
         donate_qr_file=$(prepare_donate_qr "$PANEL_STATUS" "$BOT_STATUS")
         echo ""
         print_message "SUCCESS" "${BOLD}$(t rs_complete)${RESET}"
-        [[ "$EXTRA_STATUS" == "0" ]] && print_message "INFO" "$(t ex_rs_restart)"
+        [[ "$EXTRA_STATUS" == "0" ]] && print_message "WARN" "$(t ex_rs_restart)"
         show_donate_after_restore "$PANEL_STATUS" "$BOT_STATUS" "$donate_qr_file"
         [[ -n "$donate_qr_file" ]] && rm -f "$donate_qr_file"
         offer_enable_encryption_after_restore
@@ -5615,16 +5615,16 @@ menu_what_to_backup() {
         ui_menu_reset
         ui_menu_add 1 "$(t wb_menu_panel)"
         ui_menu_add 2 "$(t wb_menu_bot)"
-        ui_menu_add 3 "$(t wb_menu_mode)"
-        ui_menu_add 4 "$(t wb_menu_extra)"
+        ui_menu_add 3 "$(t wb_menu_extra)"
+        ui_menu_add 4 "$(t wb_menu_mode)"
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
         case $choice in
             1) settings_panel ;;
             2) settings_bot ;;
-            3) backup_mode_menu ;;
-            4) settings_extra ;;
+            3) settings_extra ;;
+            4) backup_mode_menu ;;
             0) return ;;
         esac
     done
