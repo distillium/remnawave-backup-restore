@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.16"
+VERSION="4.2.17"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -492,7 +492,7 @@ ui_spin_stop() {
         _UI_SPIN_ON=0
     fi
 }
-trap 'ui_spin_stop; if [[ -t 0 ]]; then stty echo 2>/dev/null; printf "\e[?25h"; fi' EXIT
+trap '_tg_proxy_cleanup 2>/dev/null; ui_spin_stop; if [[ -t 0 ]]; then stty echo 2>/dev/null; printf "\e[?25h"; fi' EXIT
 
 _LOG_ROTATED=false
 _log_rotate() {
@@ -693,6 +693,7 @@ create_bot_backup() {
     if [[ -z "$BOT_CONTAINER_NAME" ]]; then
         print_message "ERROR" "$(t cbot_unknown) $BOT_BACKUP_SELECTED"
         print_message "INFO" "$(t cbot_skip)"
+        BACKUP_WARNINGS+=("$(t cbot_skipped_tg) $(t cbot_why_unknown)")
         return 0
     fi
 
@@ -701,14 +702,18 @@ create_bot_backup() {
     
     if ! docker inspect "$BOT_CONTAINER_NAME" > /dev/null 2>&1 || ! docker container inspect -f '{{.State.Running}}' "$BOT_CONTAINER_NAME" 2>/dev/null | grep -q "true"; then
         print_message "WARN" "$(t cbot_not_running)"
+        BACKUP_WARNINGS+=("$(t cbot_skipped_tg) $(t cbot_why_not_running)")
         return 0
     fi
     
     ui_spin_start "$(t cbot_dumping)"
-    if ! docker exec "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"; then
+    if ! ( set -o pipefail; docker exec "$BOT_CONTAINER_NAME" pg_dumpall -c -U "$BOT_BACKUP_DB_USER" | gzip -9 > "$BACKUP_DIR/$BOT_BACKUP_FILE_DB" ); then
+        rm -f "$BACKUP_DIR/$BOT_BACKUP_FILE_DB"
         print_message "ERROR" "$(t cbot_dump_err)"
+        BACKUP_WARNINGS+=("$(t cbot_skipped_tg) $(t cbot_why_dump)")
         return 0
     fi
+    local -a bot_items=("$BOT_BACKUP_FILE_DB")
     META_BOT_VERSION=$(get_rwp_shop_version)
 
     local ai_params
@@ -724,11 +729,12 @@ create_bot_backup() {
             local BOT_AI_DUMP_FILE="bot_assistant_dump_${TIMESTAMP}.sql.gz"
             ui_spin_start "$(t cbot_ai_dumping)"
             if ( set -o pipefail; docker exec "$AI_CONTAINER" pg_dump -c --if-exists -U "$AI_DB_USER" -d "$AI_DB_NAME" | gzip -9 > "$BACKUP_DIR/$BOT_AI_DUMP_FILE" ); then
-                BACKUP_ITEMS+=("$BOT_AI_DUMP_FILE")
+                bot_items+=("$BOT_AI_DUMP_FILE")
                 print_message "SUCCESS" "$(t cbot_ai_dumped)"
             else
                 rm -f "$BACKUP_DIR/$BOT_AI_DUMP_FILE"
                 print_message "WARN" "$(t cbot_ai_dump_err)"
+                BACKUP_WARNINGS+=("$(t cbot_ai_dump_err)")
             fi
         fi
     fi
@@ -740,20 +746,26 @@ create_bot_backup() {
             exclude_args+="--exclude=$pattern "
         done
         
-        eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'" || true
-        local bot_tar_exit=${PIPESTATUS[0]}
+        local bot_tar_exit=0
+        eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$BOT_DIR_ARCHIVE' $exclude_args -C '$(dirname "$BOT_BACKUP_PATH")' '$(basename "$BOT_BACKUP_PATH")'" || bot_tar_exit=$?
         if [[ $bot_tar_exit -lt 2 ]]; then
             print_message "SUCCESS" "$(t cbot_archived)"
         else
             print_message "ERROR" "$(t cbot_arch_err)"
-            return 1
+            local f
+            for f in "${bot_items[@]}" "$BOT_DIR_ARCHIVE"; do rm -f "$BACKUP_DIR/$f"; done
+            BACKUP_WARNINGS+=("$(t cbot_skipped_tg) $(t cbot_why_arch)")
+            return 0
         fi
     else
         print_message "WARN" "$(t cbot_dir_missing)"
+        local f
+        for f in "${bot_items[@]}"; do rm -f "$BACKUP_DIR/$f"; done
+        BACKUP_WARNINGS+=("$(t cbot_skipped_tg) $(t cbot_why_dir)")
         return 0
     fi
     
-    BACKUP_ITEMS+=("$BOT_BACKUP_FILE_DB" "$BOT_DIR_ARCHIVE")
+    BACKUP_ITEMS+=("${bot_items[@]}" "$BOT_DIR_ARCHIVE")
     
     print_message "SUCCESS" "$(t cbot_done)"
     echo ""
@@ -1741,6 +1753,212 @@ donate_keyboard() {
     printf '{"inline_keyboard":[[{"text":"%s","url":"%s"}]]}' "$(t tg_donate_btn)" "$DONATE_URL"
 }
 
+_TG_PROXY_STATE="${TMPDIR:-/tmp}/rwb_tgproxy_$$"
+
+_tg_proxy_list() {
+    local IFS='|' p
+    for p in $TG_PROXY; do
+        [[ -n "$p" ]] && printf '%s\n' "$p"
+    done
+    return 0
+}
+
+_tg_proxy_count() {
+    _tg_proxy_list | grep -c . || true
+}
+
+_tg_proxy_mask() {
+    sed -E 's#://([^:/@]+):[^@]+@#://\1:****@#' <<< "$1"
+}
+
+_tg_proxy_net_error() {
+    case "$1" in
+        5|6|7|28|35|52|56|97) return 0 ;;
+    esac
+    return 1
+}
+
+_tg_curl() {
+    local -a proxies=()
+    mapfile -t proxies < <(_tg_proxy_list)
+    if [[ ${#proxies[@]} -eq 0 ]]; then
+        curl "$@"
+        return
+    fi
+
+    local good="" i out rc=0
+    [[ -f "$_TG_PROXY_STATE" ]] && good=$(head -n 1 "$_TG_PROXY_STATE" 2>/dev/null)
+    local -a order=()
+    [[ "$good" =~ ^[0-9]+$ && "$good" -lt ${#proxies[@]} ]] && order+=("$good")
+    for i in "${!proxies[@]}"; do
+        [[ "$i" == "$good" ]] || order+=("$i")
+    done
+
+    for i in "${order[@]}"; do
+        rc=0
+        out=$(curl --proxy "${proxies[$i]}" "$@") || rc=$?
+        if [[ $rc -eq 0 ]] || ! _tg_proxy_net_error "$rc"; then
+            if [[ $rc -eq 0 && "$i" != "$good" ]]; then
+                echo "$i" > "$_TG_PROXY_STATE" 2>/dev/null || true
+                [[ "$i" -gt 0 ]] && _tg_proxy_failover_notice "$i" "${proxies[$i]}" "${proxies[0]}"
+            fi
+            printf '%s' "$out"
+            return $rc
+        fi
+        log_write "WARN" "Telegram proxy $((i + 1)) failed: curl exit $rc ($(_tg_proxy_mask "${proxies[$i]}"))"
+    done
+    printf '%s' "$out"
+    return $rc
+}
+
+_tg_proxy_failover_notice() {
+    local idx="$1" proxy="$2" main="$3" flag="${_TG_PROXY_STATE}.noticed"
+    [[ -f "$flag" ]] && return 0
+    : > "$flag" 2>/dev/null || true
+    local text
+    text="⚠️ $(printf "$(t tg_proxy_failover)" "$(_tg_proxy_mask "$main")" "$((idx + 1))")"
+    log_write "WARN" "Telegram main proxy is down, using proxy $((idx + 1))"
+    local -a params=(-d chat_id="$CHAT_ID" --data-urlencode "text=${text}")
+    [[ -n "$TG_MESSAGE_THREAD_ID" ]] && params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
+    curl -s --connect-timeout 10 --max-time 30 --proxy "$proxy" -X POST \
+        "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" "${params[@]}" >/dev/null 2>&1 || true
+}
+
+_tg_proxy_cleanup() {
+    rm -f "$_TG_PROXY_STATE" "${_TG_PROXY_STATE}.noticed" 2>/dev/null || true
+}
+
+_tg_proxy_probe() {
+    local proxy="$1" out rc=0 t0=$SECONDS
+    if [[ -n "$BOT_TOKEN" ]]; then
+        out=$(curl -s --connect-timeout 10 --max-time 15 --proxy "$proxy" \
+            "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>&1) || rc=$?
+        if [[ $rc -eq 0 && "$out" == *'"ok":true'* ]]; then
+            echo "ok $((SECONDS - t0))"
+        elif [[ $rc -eq 0 ]]; then
+            echo "token $out"
+        else
+            echo "fail $rc"
+        fi
+    else
+        curl -s -o /dev/null --connect-timeout 10 --max-time 15 --proxy "$proxy" "https://api.telegram.org" || rc=$?
+        if [[ $rc -eq 0 ]]; then echo "ok $((SECONDS - t0))"; else echo "fail $rc"; fi
+    fi
+}
+
+_tg_proxy_fail_reason() {
+    case "$1" in
+        5) t tg_px_err_resolve_proxy ;;
+        6) t tg_px_err_resolve ;;
+        7|97) t tg_px_err_connect ;;
+        28) t tg_px_err_timeout ;;
+        35) t tg_px_err_ssl ;;
+        *) printf "$(t tg_px_err_other)" "$1" ;;
+    esac
+}
+
+settings_tg_proxy() {
+    local choice n i p
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t tg_px_title)${RESET}"
+        echo ""
+        echo -e "   ${LIGHT_GRAY}$(t tg_px_hint)${RESET}"
+        echo ""
+        local -a list=()
+        mapfile -t list < <(_tg_proxy_list)
+        n=${#list[@]}
+        if [[ $n -eq 0 ]]; then
+            echo -e "   ${LIGHT_GRAY}$(t tg_px_none)${RESET}"
+        else
+            i=0
+            for p in "${list[@]}"; do
+                i=$((i + 1))
+                if [[ $i -eq 1 ]]; then
+                    echo -e "   ${i}. ${BOLD}$(_tg_proxy_mask "$p")${RESET} ${LIGHT_GRAY}· $(t tg_px_main)${RESET}"
+                else
+                    echo -e "   ${i}. $(_tg_proxy_mask "$p")"
+                fi
+            done
+        fi
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t tg_px_add)"
+        [[ $n -gt 0 ]] && ui_menu_add 2 "$(t tg_px_remove)"
+        [[ $n -gt 1 ]] && ui_menu_add 3 "$(t tg_px_make_main)"
+        [[ $n -gt 0 ]] && ui_menu_add 4 "$(t tg_px_test_all)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        echo ""
+        case "$choice" in
+            1)
+                local new_px
+                print_message "INFO" "$(t st_tg_proxy_examples)"
+                ui_input new_px "$(t tg_px_enter)" "socks5://user:pass@host:1080"
+                [[ -z "$new_px" ]] && continue
+                if ! [[ "$new_px" =~ ^(socks5h?|socks4a?|https?)://[^[:space:]\|\"\$\`\\]+$ ]]; then
+                    print_message "ERROR" "$(t tg_px_bad)"
+                else
+                    list+=("$new_px")
+                    local IFS='|'; TG_PROXY="${list[*]}"; unset IFS
+                    save_config
+                    _tg_proxy_cleanup
+                    print_message "SUCCESS" "$(t tg_px_added) ${BOLD}$(_tg_proxy_mask "$new_px")${RESET}"
+                fi
+                ;;
+            2|3)
+                [[ $n -gt 0 ]] || continue
+                [[ "$choice" == 3 && $n -lt 2 ]] && continue
+                local pick
+                if [[ "$choice" == 2 ]]; then print_message "ACTION" "$(t tg_px_which_remove)"; else print_message "ACTION" "$(t tg_px_which_main)"; fi
+                ui_menu_reset
+                i=0
+                for p in "${list[@]}"; do
+                    i=$((i + 1))
+                    ui_menu_add "$i" "$(_tg_proxy_mask "$p")"
+                done
+                ui_menu_gap
+                ui_menu_add 0 "$(t back)"
+                ui_menu_choose pick
+                [[ "$pick" =~ ^[0-9]+$ && "$pick" -ge 1 && "$pick" -le $n ]] || continue
+                p="${list[$((pick - 1))]}"
+                unset 'list[pick-1]'
+                list=("${list[@]}")
+                [[ "$choice" == 3 ]] && list=("$p" "${list[@]}")
+                local IFS='|'; TG_PROXY="${list[*]}"; unset IFS
+                save_config
+                _tg_proxy_cleanup
+                if [[ "$choice" == 2 ]]; then
+                    print_message "SUCCESS" "$(t tg_px_removed) ${BOLD}$(_tg_proxy_mask "$p")${RESET}"
+                else
+                    print_message "SUCCESS" "$(t tg_px_main_set) ${BOLD}$(_tg_proxy_mask "$p")${RESET}"
+                fi
+                ;;
+            4)
+                [[ $n -gt 0 ]] || continue
+                i=0
+                local res
+                for p in "${list[@]}"; do
+                    i=$((i + 1))
+                    ui_spin_start "$(printf "$(t tg_px_testing)" "$i" "$(_tg_proxy_mask "$p")")"
+                    res=$(_tg_proxy_probe "$p")
+                    ui_spin_stop
+                    case "${res%% *}" in
+                        ok) print_message "SUCCESS" "${i}. $(_tg_proxy_mask "$p") · $(printf "$(t tg_px_ok)" "${res#* }")" ;;
+                        token) print_message "WARN" "${i}. $(_tg_proxy_mask "$p") · $(t tg_px_token)" ;;
+                        *) print_message "ERROR" "${i}. $(_tg_proxy_mask "$p") · $(_tg_proxy_fail_reason "${res#* }")" ;;
+                    esac
+                done
+                ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
 send_telegram_message() {
     local message="$1"
     local parse_mode="${2:-MarkdownV2}"
@@ -1751,6 +1969,7 @@ send_telegram_message() {
     fi
 
     local url="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+    message=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$message")
     local send_text="$message"
 
     if [[ "$parse_mode" == "MarkdownV2" ]]; then
@@ -1774,7 +1993,7 @@ send_telegram_message() {
     local attempt=1
 
     while [[ $attempt -le $max_attempts ]]; do
-        response=$(curl -s --connect-timeout 10 --max-time 30 -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "$url" "${data_params[@]}" -w "\n%{http_code}")
+        response=$(_tg_curl -s --connect-timeout 10 --max-time 30 -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
         local curl_status=$?
         http_code=$(echo "$response" | tail -n1)
 
@@ -1823,7 +2042,7 @@ send_telegram_document() {
     local attempt=1
 
     while [[ $attempt -le $max_attempts ]]; do
-        api_response=$(curl -s --connect-timeout 10 --max-time 120 -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+        api_response=$(_tg_curl -s --connect-timeout 10 --max-time 120 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
             "${form_params[@]}" \
             -w "%{http_code}" -o /dev/null 2>&1)
         curl_status=$?
@@ -2169,18 +2388,37 @@ _s3_cached_usage() {
     return 0
 }
 
+_usage_mark() {
+    local used="$1" total="${2:-}"
+    if [[ -n "$total" && "$total" -gt 0 ]] && (( used * 100 / total >= 90 )); then
+        printf '⚠️'
+    else
+        printf '•'
+    fi
+}
+
+_usage_over() {
+    local used="$1" total="${2:-}"
+    if [[ -n "$total" && "$total" -gt 0 && "$used" -ge "$total" ]]; then
+        printf ' — %s' "$(t usage_over_limit)"
+    fi
+    return 0
+}
+
 _usage_tg_lines() {
     local lines="" du used total s3_num bytes
     du=$(_disk_usage)
     if [[ -n "$du" ]]; then
         read -r used total <<< "$du"
-        lines+=$'\n'"• *$(t usage_disk):* $(_usage_text "$used" "$total")"
+        lines+=$'\n'"$(_usage_mark "$used" "$total") *$(t usage_disk):* $(_usage_text "$used" "$total")$(_usage_over "$used" "$total")"
     fi
     if [[ "$UPLOAD_METHOD" == "s3" ]]; then
         while IFS= read -r s3_num; do
             bytes=$(_s3_measure_usage "$s3_num" 2>/dev/null) || bytes=""
             [[ -n "$bytes" ]] || continue
-            lines+=$'\n'"• *$(_s3_label "$s3_num"):* $(_usage_text "$bytes" "$(_s3_limit_bytes "$s3_num")")"
+            local lim
+            lim=$(_s3_limit_bytes "$s3_num")
+            lines+=$'\n'"$(_usage_mark "$bytes" "$lim") *$(_s3_label "$s3_num"):* $(_usage_text "$bytes" "$lim")$(_usage_over "$bytes" "$lim")"
         done < <(_s3_configured_nums)
     fi
     printf '%s' "$lines"
@@ -2229,6 +2467,28 @@ send_s3_document() {
     return 1
 }
 
+_s3_fits_limit() {
+    local num="$1" size="$2" limit used retain unit
+    limit=$(_s3_limit_bytes "$num")
+    [[ -n "$limit" ]] || return 0
+    used=$(_s3_measure_usage "$num" 2>/dev/null) || return 0
+    (( used + size <= limit )) && return 0
+
+    retain=$(_s3_var RETAIN_DAYS "$num"); retain="${retain:-30}"
+    unit=$(_s3_ret_unit "$num")
+    if [[ "$retain" -gt 0 ]]; then
+        if [[ "$unit" == "count" ]]; then
+            [[ "$retain" -gt 1 ]] && cleanup_s3_old_backups "$num" "$((retain - 1))"
+        else
+            cleanup_s3_old_backups "$num"
+        fi
+        used=$(_s3_measure_usage "$num" 2>/dev/null) || return 0
+        (( used + size <= limit )) && return 0
+    fi
+    S3_LIMIT_FAIL_TEXT="$(printf "$(t s3_limit_no_room)" "$(_s3_label "$num")" "$(_ui_human_size "$used")" "$(_ui_human_size "$limit")" "$(_ui_human_size "$size")")"
+    return 1
+}
+
 cleanup_s3_old_backups() {
     local s3_num="$1"
 
@@ -2241,6 +2501,7 @@ cleanup_s3_old_backups() {
     local s3_retain=$(_s3_var RETAIN_DAYS "$s3_num")
     local s3_label=$(_s3_label "$s3_num")
     s3_retain="${s3_retain:-30}"
+    [[ -n "${2:-}" ]] && s3_retain="$2"
 
     if [[ -z "$s3_bucket" || -z "$s3_access" || -z "$s3_secret" ]]; then
         return 0
@@ -2257,11 +2518,7 @@ cleanup_s3_old_backups() {
     local s3_prefix_arg="${s3_prefix:+${s3_prefix}/}"
     local s3_unit
     s3_unit=$(_s3_ret_unit "$s3_num")
-    local cutoff_date=""
-    if [[ "$s3_unit" != "count" ]]; then
-        cutoff_date=$(date -d "-${s3_retain} days" +%Y-%m-%d 2>/dev/null || date -v-${s3_retain}d +%Y-%m-%d 2>/dev/null)
-        [[ -z "$cutoff_date" ]] && return 0
-    fi
+    local cutoff_epoch=$(( $(date +%s) - s3_retain * 86400 ))
 
     local file_list
     file_list=$(AWS_ACCESS_KEY_ID="$s3_access" \
@@ -2284,12 +2541,13 @@ cleanup_s3_old_backups() {
 
     local deleted_count=0
     while IFS= read -r line; do
-        local file_date=$(echo "$line" | awk '{print $1}')
+        local file_epoch
+        file_epoch=$(date -d "$(awk '{print $1" "$2}' <<< "$line")" +%s 2>/dev/null || echo "")
         local file_name=$(echo "$line" | awk '{print $NF}')
         local is_old=false
         if [[ "$s3_unit" == "count" ]]; then
             [[ -n "${s3_old_by_count[$file_name]:-}" ]] && is_old=true
-        elif [[ "$file_date" < "$cutoff_date" ]]; then
+        elif [[ -n "$file_epoch" && "$file_epoch" -lt "$cutoff_epoch" ]]; then
             is_old=true
         fi
         if [[ "$is_old" == true ]]; then
@@ -2993,6 +3251,14 @@ _verify_backup_parts() {
     return 0
 }
 
+_bk_cleanup_parts() {
+    ui_spin_stop
+    [[ -n "${TIMESTAMP:-}" && -d "$BACKUP_DIR" ]] || return 0
+    find "$BACKUP_DIR" -maxdepth 1 -type f -name "*_${TIMESTAMP}.*" ! -name 'remnawave_backup_*' -delete 2>/dev/null || true
+    rm -f "$BACKUP_DIR/backup_meta.info" "$BACKUP_DIR/extra_paths.list" 2>/dev/null || true
+    return 0
+}
+
 _verify_failed() {
     ui_spin_stop
     local msg
@@ -3040,27 +3306,28 @@ _create_backup_run() {
     
     mkdir -p "$BACKUP_DIR" || { 
         echo -e "${RED}❌ $(t bk_mkdir_err) ${BOLD}$BACKUP_DIR${RESET}.${RESET}"
-        send_telegram_message "❌ $(t bk_mkdir_err) ${BOLD}$BACKUP_DIR${RESET}." "None"
+        send_telegram_message "❌ $(t bk_mkdir_err) ${BOLD}$BACKUP_DIR${RESET}." "None" || true
         exit 1
     }
     
     BACKUP_ITEMS=()
+    BACKUP_WARNINGS=()
     
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
         print_message "INFO" "$(t bk_skip_panel)"
     else
         ui_spin_start "$(t bk_creating_dump)"
-        if ! create_panel_db_dump "$BACKUP_DIR/$BACKUP_FILE_DB"; then
-            local STATUS=$?
+        local STATUS=0
+        create_panel_db_dump "$BACKUP_DIR/$BACKUP_FILE_DB" || STATUS=$?
+        if [[ $STATUS -ne 0 ]]; then
             ui_spin_stop
             echo -e "${RED}❌ $(t bk_dump_err) ${BOLD}$STATUS${RESET}. $(t bk_check_db)${RESET}"
             local error_msg="❌ $(t bk_dump_err) ${STATUS}"
             if [[ -n "$LAST_DB_ERROR" ]]; then
                 error_msg+="${LAST_DB_ERROR}"
             fi
-            if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-                send_telegram_message "$error_msg" "None"
-            fi
+            _bk_cleanup_parts
+            send_telegram_message "$error_msg" "None" || true
             exit $STATUS
         fi
         
@@ -3078,8 +3345,8 @@ _create_backup_run() {
                 exclude_args+="--exclude=$pattern "
             done
             
-            eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'" || true
-            local rw_tar_exit=${PIPESTATUS[0]}
+            local rw_tar_exit=0
+            eval "tar --warning=no-file-changed -czf '$BACKUP_DIR/$REMNAWAVE_DIR_ARCHIVE' $exclude_args -C '$(dirname "$REMNALABS_ROOT_DIR")' '$(basename "$REMNALABS_ROOT_DIR")'" || rw_tar_exit=$?
             if [[ $rw_tar_exit -lt 2 ]]; then
                 print_message "SUCCESS" "$(t bk_arch_ok)"
                 BACKUP_ITEMS=("$BACKUP_FILE_DB" "$REMNAWAVE_DIR_ARCHIVE")
@@ -3087,13 +3354,14 @@ _create_backup_run() {
                 local STATUS=$rw_tar_exit
                 echo -e "${RED}❌ $(t bk_arch_err) ${BOLD}$STATUS${RESET}.${RESET}"
                 local error_msg="❌ $(t bk_arch_err) ${BOLD}${STATUS}${RESET}"
-                if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-                    send_telegram_message "$error_msg" "None"
-                fi
+                _bk_cleanup_parts
+                send_telegram_message "$error_msg" "None" || true
                 exit $STATUS
             fi
         else
             print_message "ERROR" "$(t bk_dir_missing) ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+            _bk_cleanup_parts
+            send_telegram_message "❌ $(t bk_dir_missing) ${REMNALABS_ROOT_DIR}" "None" || true
             exit 1
         fi
     fi
@@ -3106,6 +3374,11 @@ _create_backup_run() {
     
     if [[ ${#BACKUP_ITEMS[@]} -eq 0 ]]; then
         print_message "ERROR" "$(t bk_no_data)"
+        _bk_cleanup_parts
+        local no_data_msg="❌ $(t bk_no_data)"
+        local w
+        for w in "${BACKUP_WARNINGS[@]}"; do no_data_msg+=$'\n'"• ${w}"; done
+        send_telegram_message "$no_data_msg" "None" || true
         exit 1
     fi
     
@@ -3132,14 +3405,14 @@ METAEOF
     _verify_backup_parts || _verify_failed
     
     ui_spin_start "$(t bk_packing)"
-    if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}"; then
-        STATUS=$?
+    local STATUS=0
+    tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}" || STATUS=$?
+    if [[ $STATUS -ne 0 ]]; then
         ui_spin_stop
         echo -e "${RED}❌ $(t bk_final_err) ${BOLD}$STATUS${RESET}.${RESET}"
         local error_msg="❌ $(t bk_final_err) ${BOLD}${STATUS}${RESET}"
-        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            send_telegram_message "$error_msg" "None"
-        fi
+        _bk_cleanup_parts
+        send_telegram_message "$error_msg" "None" || true
         exit $STATUS
     fi
     if ! gzip -t "$BACKUP_DIR/$BACKUP_FILE_FINAL" 2>/dev/null; then
@@ -3163,9 +3436,8 @@ METAEOF
             rm -f "$BACKUP_DIR/${BACKUP_FILE_FINAL}.age" "$BACKUP_DIR/$BACKUP_FILE_FINAL"
             for item in "${BACKUP_ITEMS[@]}"; do rm -f "$BACKUP_DIR/$item"; done
             print_message "ERROR" "$(t enc_failed)"
-            if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-                send_telegram_message "❌ $(t enc_failed)" "None"
-            fi
+            _bk_cleanup_parts
+            send_telegram_message "❌ $(t enc_failed)" "None" || true
             exit 1
         fi
         print_message "SUCCESS" "$(t enc_encrypted_ok)"
@@ -3220,6 +3492,10 @@ METAEOF
     if [[ ${#EXTRA_SKIPPED[@]} -gt 0 ]]; then
         enc_info+=$'\n'"⚠️ $(t tg_extra_skipped) $(printf '%s ' "${EXTRA_SKIPPED[@]}")"
     fi
+    local bk_warn
+    for bk_warn in "${BACKUP_WARNINGS[@]}"; do
+        enc_info+=$'\n'"⚠️ ${bk_warn}"
+    done
     local caption_text="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"📨 *$(t tg_bk_success)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
     
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
@@ -3239,6 +3515,7 @@ METAEOF
         elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
             local s3_ok_labels=()
             local s3_fail_labels=()
+            local s3_limit_msgs=()
             local s3_num
             while IFS= read -r s3_num; do
                 local s3_chk_bucket=$(_s3_var BUCKET "$s3_num")
@@ -3248,6 +3525,17 @@ METAEOF
                     continue
                 fi
                 local s3_lbl=$(_s3_label "$s3_num")
+                local final_size
+                final_size=$(stat -c%s "$BACKUP_DIR/$BACKUP_FILE_FINAL" 2>/dev/null || echo 0)
+                ui_spin_start "$(t s3_limit_checking) (${s3_lbl})..."
+                if ! _s3_fits_limit "$s3_num" "$final_size"; then
+                    ui_spin_stop
+                    print_message "ERROR" "$S3_LIMIT_FAIL_TEXT"
+                    log_write "ERROR" "S3 ${s3_lbl}: limit reached, upload skipped"
+                    s3_fail_labels+=("${s3_lbl} ($(t s3_limit_short))")
+                    s3_limit_msgs+=("$S3_LIMIT_FAIL_TEXT")
+                    continue
+                fi
                 ui_spin_start "$(t bk_sending) (${s3_lbl})..."
                 if send_s3_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$s3_num"; then
                     s3_ok_labels+=("$s3_lbl")
@@ -3255,6 +3543,11 @@ METAEOF
                     s3_fail_labels+=("$s3_lbl")
                 fi
             done < <(_s3_configured_nums)
+
+            local lim_msg
+            for lim_msg in "${s3_limit_msgs[@]}"; do
+                send_telegram_message "⚠️ ${lim_msg}" "None" || true
+            done
 
             if [[ ${#s3_ok_labels[@]} -gt 0 ]]; then
                 print_message "SUCCESS" "$(t bk_s3_ok)"
@@ -3287,12 +3580,7 @@ METAEOF
     else
         echo -e "${RED}❌ $(t bk_file_missing) ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}. $(t bk_impossible)${RESET}"
         local error_msg="❌ $(t bk_file_missing) ${BOLD}${BACKUP_FILE_FINAL}${RESET}"
-        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            send_telegram_message "$error_msg" "None"
-
-        elif [[ "$UPLOAD_METHOD" == "s3" ]]; then
-            print_message "ERROR" "$(t bk_s3_impossible)"
-        fi
+        send_telegram_message "$error_msg" "None" || true
         exit 1
     fi
     
@@ -3380,7 +3668,7 @@ METAEOF
                             local release_url="https://github.com/distillium/remnawave-backup-restore/releases/tag/${REMOTE_VERSION_LATEST}"
                             local keyboard="{\"inline_keyboard\":[[{\"text\":\"$(t tg_auto_update_changelog)\",\"url\":\"${release_url}\"}]]}"
 
-                            curl -s -X POST ${TG_PROXY:+--proxy "$TG_PROXY"} "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                            _tg_curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
                                 -d "chat_id=${CHAT_ID}" \
                                 --data-urlencode "text=${auto_update_msg}" \
                                 -d "parse_mode=Markdown" \
@@ -4643,7 +4931,15 @@ settings_telegram() {
         print_message "INFO" "$(t st_tg_token) ${BOLD}${tg_token_shown}${RESET}"
         print_message "INFO" "$(t st_tg_chatid) ${BOLD}${CHAT_ID}${RESET}"
         print_message "INFO" "$(t st_tg_thread) ${BOLD}${TG_MESSAGE_THREAD_ID:-$(t not_set)}${RESET}"
-        print_message "INFO" "$(t st_tg_proxy) ${BOLD}${TG_PROXY:-$(t not_set)}${RESET}"
+        local tg_px_n
+        tg_px_n=$(_tg_proxy_count)
+        if [[ "$tg_px_n" -gt 0 ]]; then
+            local tg_px_more=""
+            [[ "$tg_px_n" -gt 1 ]] && tg_px_more=" $(printf "$(t tg_px_more)" "$((tg_px_n - 1))")"
+            print_message "INFO" "$(t st_tg_proxy) ${BOLD}$(_tg_proxy_mask "$(_tg_proxy_list | head -n 1)")${RESET}${tg_px_more}"
+        else
+            print_message "INFO" "$(t st_tg_proxy) ${BOLD}$(t not_set)${RESET}"
+        fi
         echo ""
         echo ""
         ui_menu_reset
@@ -4651,15 +4947,18 @@ settings_telegram() {
         ui_menu_add 2 "$(t st_tg_change_id)"
         ui_menu_add 3 "$(t st_tg_change_thread)"
         ui_menu_add 4 "$(t st_tg_change_proxy)"
-        ui_menu_add 5 "$(t st_tg_test_proxy)"
-        ui_menu_add 6 "$(t st_tg_test_msg)"
+        ui_menu_add 5 "$(t st_tg_test_msg)"
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose telegram_choice
         echo ""
 
+        if [[ "$telegram_choice" == "4" ]]; then
+            settings_tg_proxy
+            continue
+        fi
         case $telegram_choice in
-            6)
+            5)
                 if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
                     print_message "ERROR" "$(t st_tg_test_msg_nocfg)"
                 else
@@ -4695,63 +4994,6 @@ settings_telegram() {
                 TG_MESSAGE_THREAD_ID="$NEW_TG_MESSAGE_THREAD_ID"
                 save_config
                 print_message "SUCCESS" "$(t st_tg_thread_ok)"
-                ;;
-            4)
-                print_message "INFO" "$(t st_tg_proxy_info)"
-                print_message "INFO" "$(t st_tg_proxy_examples)"
-                echo ""
-                ui_input NEW_TG_PROXY "$(t st_tg_enter_proxy)"
-                TG_PROXY="$NEW_TG_PROXY"
-                save_config
-                if [[ -n "$TG_PROXY" ]]; then
-                    print_message "SUCCESS" "$(t st_tg_proxy_ok)"
-                else
-                    print_message "SUCCESS" "$(t st_tg_proxy_cleared)"
-                fi
-                ;;
-            5)
-                if [[ -z "$TG_PROXY" ]]; then
-                    print_message "ERROR" "$(t st_tg_proxy_not_set)"
-                else
-                    print_message "INFO" "$(t st_tg_proxy_testing)"
-                    local max_attempts=3
-                    local attempt=1
-                    local success=false
-                    while [[ $attempt -le $max_attempts ]]; do
-                        print_message "INFO" "$(printf "$(t st_tg_proxy_attempt)" "$attempt" "$max_attempts")"
-                        local start_time=$SECONDS
-                        local curl_output curl_exit
-                        if curl_output=$(curl -s --connect-timeout 10 --max-time 15 \
-                            --proxy "$TG_PROXY" \
-                            "https://api.telegram.org/bot$BOT_TOKEN/getMe" 2>&1); then
-                            curl_exit=0
-                        else
-                            curl_exit=$?
-                        fi
-                        local elapsed=$((SECONDS - start_time))
-                        if [[ $curl_exit -eq 0 && "$curl_output" == *'"ok":true'* ]]; then
-                            print_message "SUCCESS" "$(printf "$(t st_tg_proxy_test_ok)" "$elapsed")"
-                            success=true
-                            break
-                        else
-                            print_message "ERROR" "$(printf "$(t st_tg_proxy_attempt_fail)" "$attempt" "$elapsed")"
-                            case $curl_exit in
-                                0)  echo -e "${YELLOW}Details: Connected, but Telegram did not confirm the bot token: ${curl_output}${RESET}" ;;
-                                7)  echo -e "${YELLOW}Details: Could not connect to proxy (exit $curl_exit)${RESET}" ;;
-                                28) echo -e "${YELLOW}Details: Connection timed out (exit $curl_exit)${RESET}" ;;
-                                35) echo -e "${YELLOW}Details: SSL handshake failed (exit $curl_exit)${RESET}" ;;
-                                *)  echo -e "${YELLOW}Details: curl error (exit $curl_exit): ${curl_output}${RESET}" ;;
-                            esac
-                            if [[ $attempt -lt $max_attempts ]]; then
-                                sleep 5
-                            fi
-                        fi
-                        ((attempt++)) || true
-                    done
-                    if [[ "$success" == "false" ]]; then
-                        print_message "ERROR" "$(t st_tg_proxy_test_fail)"
-                    fi
-                fi
                 ;;
             0) break ;;
             *) print_message "ERROR" "$(t invalid_input_select)" ;;
@@ -5299,37 +5541,41 @@ _path_within() {
     [[ "$1" == "$2" || "$1" == "$2"/* ]]
 }
 
+_ecp_say() {
+    [[ "${_ECP_QUIET:-}" == "1" ]] || print_message "ERROR" "$1"
+}
+
 _extra_check_path() {
     local p="$1" sys owned existing
     if [[ "$p" != /* ]]; then
-        print_message "ERROR" "$(t cfg_path_abs)"; return 1
+        _ecp_say "$(t cfg_path_abs)"; return 1
     fi
     local bad_chars='["$`\\|]'
     if [[ "$p" =~ $bad_chars ]]; then
-        print_message "ERROR" "$(t ex_bad_chars)"; return 1
+        _ecp_say "$(t ex_bad_chars)"; return 1
     fi
     if [[ ! -e "$p" ]]; then
-        print_message "ERROR" "$(t ex_not_found) ${BOLD}$p${RESET}"; return 1
+        _ecp_say "$(t ex_not_found) ${BOLD}$p${RESET}"; return 1
     fi
     for sys in / /proc /sys /dev /run /boot /usr /bin /sbin /lib /lib64 /var/lib/docker; do
         if [[ "$p" == "$sys" ]] || { [[ "$sys" != "/" ]] && _path_within "$p" "$sys"; }; then
-            print_message "ERROR" "$(t ex_system_path) ${BOLD}$p${RESET}"; return 1
+            _ecp_say "$(t ex_system_path) ${BOLD}$p${RESET}"; return 1
         fi
     done
     for owned in "$INSTALL_DIR" "$BACKUP_DIR"; do
         if _path_within "$p" "$owned" || _path_within "$owned" "$p"; then
-            print_message "ERROR" "$(t ex_own_path)"; return 1
+            _ecp_say "$(t ex_own_path)"; return 1
         fi
     done
     if _panel_configured && { _path_within "$p" "$REMNALABS_ROOT_DIR" || _path_within "$REMNALABS_ROOT_DIR" "$p"; }; then
-        print_message "ERROR" "$(t ex_in_panel)"; return 1
+        _ecp_say "$(t ex_in_panel)"; return 1
     fi
     if _bot_configured && { _path_within "$p" "$BOT_BACKUP_PATH" || _path_within "$BOT_BACKUP_PATH" "$p"; }; then
-        print_message "ERROR" "$(t ex_in_bot)"; return 1
+        _ecp_say "$(t ex_in_bot)"; return 1
     fi
     while IFS= read -r existing; do
         if _path_within "$p" "$existing" || _path_within "$existing" "$p"; then
-            print_message "ERROR" "$(t ex_overlap) ${BOLD}$existing${RESET}"; return 1
+            _ecp_say "$(t ex_overlap) ${BOLD}$existing${RESET}"; return 1
         fi
     done < <(_extra_list)
     return 0
@@ -5349,26 +5595,79 @@ _extra_suggestions() {
     return 0
 }
 
-_extra_add() {
-    local -a sugg=()
-    local s choice new_path i=0 bytes _ex_ans
-    while IFS= read -r s; do sugg+=("$s"); done < <(_extra_suggestions)
-    print_message "ACTION" "$(t ex_add_title)"
-    ui_menu_reset
-    for s in "${sugg[@]}"; do
-        i=$((i + 1))
-        ui_menu_add "$i" "$s ${LIGHT_GRAY}· $(_ui_human_size "$(_path_bytes "$s")")${RESET}"
+_extra_browse_list() {
+    local dir="$1" e name
+    shopt -s nullglob
+    for e in "$dir"/* "$dir"/.[!.]*; do
+        name="${e##*/}"
+        if [[ "$name" == .* ]]; then
+            [[ -d "$e" ]] || continue
+            case "$name" in .cache|.npm|.local|.vscode-server|.cursor-server|.docker) continue ;; esac
+        fi
+        _ECP_QUIET=1 _extra_check_path "$e" || continue
+        printf '%s\n' "$e"
     done
-    ui_menu_add "$((i + 1))" "$(t custom_path)"
+    shopt -u nullglob
+    return 0
+}
+
+_extra_browse_pick() {
+    local -a items=()
+    local e choice i=0
+    while IFS= read -r e; do items+=("$e"); done < <(_extra_browse_list "$2")
+    [[ ${#items[@]} -eq 0 ]] && return 1
+    echo ""
+    print_message "ACTION" "$(printf "$(t ex_browse_title)" "$2")"
+    ui_menu_reset
+    for e in "${items[@]}"; do
+        i=$((i + 1))
+        if [[ -d "$e" ]]; then ui_menu_add "$i" "${e##*/}/"; else ui_menu_add "$i" "${e##*/}"; fi
+    done
     ui_menu_gap
     ui_menu_add 0 "$(t back)"
+    ui_menu_choose choice
+    [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le ${#items[@]} ]] || return 1
+    printf -v "$1" '%s' "${items[$((choice - 1))]}"
+}
+
+_extra_add() {
+    local -a sugg=()
+    local s choice new_path i bytes _ex_ans n_opt n_root k_opt k_root k_custom
+    while IFS= read -r s; do sugg+=("$s"); done < <(_extra_suggestions)
+    n_opt=$(_extra_browse_list /opt | grep -c . || true)
+    n_root=$(_extra_browse_list /root | grep -c . || true)
     while true; do
+        print_message "ACTION" "$(t ex_add_title)"
+        ui_menu_reset
+        i=0
+        for s in "${sugg[@]}"; do
+            i=$((i + 1))
+            ui_menu_add "$i" "$s ${LIGHT_GRAY}· $(_ui_human_size "$(_path_bytes "$s")")${RESET}"
+        done
+        [[ $i -gt 0 ]] && ui_menu_gap
+        k_opt=-1; k_root=-1
+        if [[ "$n_opt" -gt 0 ]]; then
+            i=$((i + 1)); k_opt=$i
+            ui_menu_add "$i" "$(printf "$(t ex_browse)" /opt "$n_opt")"
+        fi
+        if [[ "$n_root" -gt 0 ]]; then
+            i=$((i + 1)); k_root=$i
+            ui_menu_add "$i" "$(printf "$(t ex_browse)" /root "$n_root")"
+        fi
+        i=$((i + 1)); k_custom=$i
+        ui_menu_add "$i" "$(t custom_path)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
         if [[ "$choice" == "0" ]]; then
             return 1
         elif [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le ${#sugg[@]} ]]; then
             new_path="${sugg[$((choice - 1))]}"
-        elif [[ "$choice" == "$((i + 1))" ]]; then
+        elif [[ "$choice" == "$k_opt" ]]; then
+            _extra_browse_pick new_path /opt || { echo ""; continue; }
+        elif [[ "$choice" == "$k_root" ]]; then
+            _extra_browse_pick new_path /root || { echo ""; continue; }
+        elif [[ "$choice" == "$k_custom" ]]; then
             echo ""
             ui_input new_path "$(t ex_enter_path)" "/etc/nginx"
             new_path="${new_path%/}"
@@ -5376,12 +5675,12 @@ _extra_add() {
         else
             continue
         fi
-        _extra_check_path "$new_path" || continue
+        _extra_check_path "$new_path" || { echo ""; continue; }
         bytes=$(_path_bytes "$new_path")
         if [[ "${bytes:-0}" -gt $((1024 * 1024 * 1024)) ]]; then
             print_message "WARN" "$(printf "$(t ex_big)" "$(_ui_human_size "$bytes")")"
             ui_confirm _ex_ans "$(t ex_big_q)"
-            [[ "$_ex_ans" == "y" ]] || continue
+            [[ "$_ex_ans" == "y" ]] || { echo ""; continue; }
         fi
         local -a cur=()
         mapfile -t cur < <(_extra_list)
@@ -5541,6 +5840,7 @@ restore_extra_files() {
         return 2
     fi
 
+    rm -rf -- "$INSTALL_DIR/pre-restore"
     local pre="$INSTALL_DIR/pre-restore/$(date +%Y-%m-%d_%H_%M_%S)"
     local rel ok=0 failed=0 saved=false
     for p in "${chosen[@]}"; do
@@ -5917,7 +6217,7 @@ main_menu() {
         ui_menu_choose choice "${choice:-}"
         echo ""
         case $choice in
-            1) create_backup || true; read -rp "$(t press_enter)" ;;
+            1) ( create_backup ) || true; read -rp "$(t press_enter)" ;;
             2) restore_backup ;;
             3) menu_what_to_backup ;;
             4) configure_upload_method ;;
