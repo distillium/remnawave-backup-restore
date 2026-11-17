@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.14"
+VERSION="4.2.15"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -54,6 +54,7 @@ BOT_BACKUP_ENABLED="false"
 BOT_BACKUP_PATH=""
 BOT_BACKUP_SELECTED=""
 BOT_BACKUP_DB_USER="postgres"
+EXTRA_PATHS=""
 
 if [[ -t 0 ]]; then
     RED=$'\e[31m'
@@ -684,7 +685,7 @@ create_bot_backup() {
         return 0
     fi
     
-    print_message "INFO" "$(t cbot_creating) ${BOLD}${BOT_BACKUP_SELECTED}${RESET}..."
+    print_message "INFO" "$(t cbot_creating) ${BOLD}$(_bot_display_name "$BOT_BACKUP_SELECTED")${RESET}..."
     
     local bot_params=$(get_bot_params "$BOT_BACKUP_SELECTED")
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
@@ -1187,6 +1188,7 @@ S3_BUCKET="$S3_BUCKET"
 S3_REGION="$S3_REGION"
 S3_PREFIX="$S3_PREFIX"
 S3_RETAIN_DAYS="$S3_RETAIN_DAYS"
+S3_RETAIN_UNIT="${S3_RETAIN_UNIT:-days}"
 S3_LIMIT_GB="$S3_LIMIT_GB"
 S3_NAME="$S3_NAME"
 S3_COUNT="${S3_COUNT:-1}"
@@ -1198,6 +1200,7 @@ S3_2_BUCKET="$S3_2_BUCKET"
 S3_2_REGION="$S3_2_REGION"
 S3_2_PREFIX="$S3_2_PREFIX"
 S3_2_RETAIN_DAYS="$S3_2_RETAIN_DAYS"
+S3_2_RETAIN_UNIT="${S3_2_RETAIN_UNIT:-days}"
 S3_2_LIMIT_GB="$S3_2_LIMIT_GB"
 S3_3_NAME="$S3_3_NAME"
 S3_3_ENDPOINT="$S3_3_ENDPOINT"
@@ -1207,6 +1210,7 @@ S3_3_BUCKET="$S3_3_BUCKET"
 S3_3_REGION="$S3_3_REGION"
 S3_3_PREFIX="$S3_3_PREFIX"
 S3_3_RETAIN_DAYS="$S3_3_RETAIN_DAYS"
+S3_3_RETAIN_UNIT="${S3_3_RETAIN_UNIT:-days}"
 S3_3_LIMIT_GB="$S3_3_LIMIT_GB"
 S3_4_NAME="$S3_4_NAME"
 S3_4_ENDPOINT="$S3_4_ENDPOINT"
@@ -1216,6 +1220,7 @@ S3_4_BUCKET="$S3_4_BUCKET"
 S3_4_REGION="$S3_4_REGION"
 S3_4_PREFIX="$S3_4_PREFIX"
 S3_4_RETAIN_DAYS="$S3_4_RETAIN_DAYS"
+S3_4_RETAIN_UNIT="${S3_4_RETAIN_UNIT:-days}"
 S3_4_LIMIT_GB="$S3_4_LIMIT_GB"
 S3_5_NAME="$S3_5_NAME"
 S3_5_ENDPOINT="$S3_5_ENDPOINT"
@@ -1225,6 +1230,7 @@ S3_5_BUCKET="$S3_5_BUCKET"
 S3_5_REGION="$S3_5_REGION"
 S3_5_PREFIX="$S3_5_PREFIX"
 S3_5_RETAIN_DAYS="$S3_5_RETAIN_DAYS"
+S3_5_RETAIN_UNIT="${S3_5_RETAIN_UNIT:-days}"
 S3_5_LIMIT_GB="$S3_5_LIMIT_GB"
 RETAIN_BACKUPS_DAYS="$RETAIN_BACKUPS_DAYS"
 RETAIN_BACKUPS_VALUE="${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}"
@@ -1237,6 +1243,8 @@ BOT_BACKUP_ENABLED="$BOT_BACKUP_ENABLED"
 BOT_BACKUP_PATH="$BOT_BACKUP_PATH"
 BOT_BACKUP_SELECTED="$BOT_BACKUP_SELECTED"
 BOT_BACKUP_DB_USER="$BOT_BACKUP_DB_USER"
+EXTRA_PATHS="$EXTRA_PATHS"
+BACKUP_TIMEOUT_MINUTES="${BACKUP_TIMEOUT_MINUTES:-60}"
 SKIP_PANEL_BACKUP="$SKIP_PANEL_BACKUP"
 DB_CONNECTION_TYPE="$DB_CONNECTION_TYPE"
 DB_HOST="$DB_HOST"
@@ -1281,6 +1289,7 @@ load_or_create_config() {
         S3_REGION=${S3_REGION:-}
         S3_PREFIX=${S3_PREFIX:-}
         S3_RETAIN_DAYS=${S3_RETAIN_DAYS:-30}
+        S3_RETAIN_UNIT=${S3_RETAIN_UNIT:-days}
         S3_LIMIT_GB=${S3_LIMIT_GB:-}
         S3_NAME=${S3_NAME:-}
         S3_COUNT=${S3_COUNT:-1}
@@ -1294,6 +1303,7 @@ load_or_create_config() {
         S3_2_REGION=${S3_2_REGION:-}
         S3_2_PREFIX=${S3_2_PREFIX:-}
         S3_2_RETAIN_DAYS=${S3_2_RETAIN_DAYS:-30}
+        S3_2_RETAIN_UNIT=${S3_2_RETAIN_UNIT:-days}
         S3_2_LIMIT_GB=${S3_2_LIMIT_GB:-}
         S3_3_NAME=${S3_3_NAME:-}
         S3_3_ENDPOINT=${S3_3_ENDPOINT:-}
@@ -1303,6 +1313,7 @@ load_or_create_config() {
         S3_3_REGION=${S3_3_REGION:-}
         S3_3_PREFIX=${S3_3_PREFIX:-}
         S3_3_RETAIN_DAYS=${S3_3_RETAIN_DAYS:-30}
+        S3_3_RETAIN_UNIT=${S3_3_RETAIN_UNIT:-days}
         S3_3_LIMIT_GB=${S3_3_LIMIT_GB:-}
         S3_4_NAME=${S3_4_NAME:-}
         S3_4_ENDPOINT=${S3_4_ENDPOINT:-}
@@ -1312,6 +1323,7 @@ load_or_create_config() {
         S3_4_REGION=${S3_4_REGION:-}
         S3_4_PREFIX=${S3_4_PREFIX:-}
         S3_4_RETAIN_DAYS=${S3_4_RETAIN_DAYS:-30}
+        S3_4_RETAIN_UNIT=${S3_4_RETAIN_UNIT:-days}
         S3_4_LIMIT_GB=${S3_4_LIMIT_GB:-}
         S3_5_NAME=${S3_5_NAME:-}
         S3_5_ENDPOINT=${S3_5_ENDPOINT:-}
@@ -1321,6 +1333,7 @@ load_or_create_config() {
         S3_5_REGION=${S3_5_REGION:-}
         S3_5_PREFIX=${S3_5_PREFIX:-}
         S3_5_RETAIN_DAYS=${S3_5_RETAIN_DAYS:-30}
+        S3_5_RETAIN_UNIT=${S3_5_RETAIN_UNIT:-days}
         S3_5_LIMIT_GB=${S3_5_LIMIT_GB:-}
         RETAIN_BACKUPS_DAYS=${RETAIN_BACKUPS_DAYS:-7}
         RETAIN_BACKUPS_VALUE=${RETAIN_BACKUPS_VALUE:-$RETAIN_BACKUPS_DAYS}
@@ -1933,6 +1946,8 @@ _retention_display() {
         printf '%s' "$(t st_retention_value_disabled)"
     elif [[ "$unit" == "hours" ]]; then
         printf '%s %s' "$value" "$(_plural "$value" "$(t ret_hours_1)" "$(t ret_hours_2)" "$(t ret_hours_5)")"
+    elif [[ "$unit" == "count" ]]; then
+        printf "$(t ret_count_fmt)" "$value" "$(_plural "$value" "$(t ret_count_1)" "$(t ret_count_2)" "$(t ret_count_5)")"
     else
         printf '%s %s' "$value" "$(_plural "$value" "$(t ret_days_1)" "$(t ret_days_2)" "$(t ret_days_5)")"
     fi
@@ -1943,6 +1958,8 @@ _retention_short() {
         t ret_forever
     elif [[ "$2" == "hours" ]]; then
         printf "$(t ret_short_hours)" "$1"
+    elif [[ "$2" == "count" ]]; then
+        printf "$(t ret_short_count)" "$1"
     else
         printf "$(t ret_short_days)" "$1"
     fi
@@ -1968,25 +1985,61 @@ _retention_set_local() {
     ui_menu_reset
     ui_menu_add 1 "$(t ret_unit_days)"
     ui_menu_add 2 "$(t ret_unit_hours)"
+    ui_menu_add 3 "$(t ret_unit_count)"
     ui_menu_gap
     ui_menu_add 0 "$(t back)"
     ui_menu_choose unit_choice
     case "$unit_choice" in
         1) new_unit="days"; unit_word="$(t st_retention_days)" ;;
         2) new_unit="hours"; unit_word="$(t st_retention_hours)" ;;
+        3) new_unit="count" ;;
         *) return 1 ;;
     esac
     echo ""
-    _ask_retention new_val "$(printf "$(t ret_enter_local)" "$unit_word")" "$RETAIN_BACKUPS_VALUE"
+    local ret_label
+    if [[ "$new_unit" == "count" ]]; then
+        ret_label="$(t ret_enter_local_count)"
+    else
+        ret_label="$(printf "$(t ret_enter_local)" "$unit_word")"
+    fi
+    _ask_retention new_val "$ret_label" "$RETAIN_BACKUPS_VALUE"
     RETAIN_BACKUPS_UNIT="$new_unit"
     RETAIN_BACKUPS_VALUE="$new_val"
     save_config
     print_message "SUCCESS" "$(t ret_local_ok) ${BOLD}$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")${RESET}"
 }
 
+_s3_ret_unit() {
+    local u
+    u=$(_s3_var RETAIN_UNIT "$1")
+    [[ "$u" == "count" ]] && echo count || echo days
+}
+
+_s3_ask_retention() {
+    local num="$1" unit_choice unit new_val label
+    print_message "ACTION" "$(t ret_pick_unit)"
+    ui_menu_reset
+    ui_menu_add 1 "$(t ret_unit_days)"
+    ui_menu_add 2 "$(t ret_unit_count)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose unit_choice
+    case "$unit_choice" in
+        1) unit="days"; label="$(printf "$(t ret_enter_s3)" "$(_s3_label "$num")")" ;;
+        2) unit="count"; label="$(printf "$(t ret_enter_s3_count)" "$(_s3_label "$num")")" ;;
+        *) return 1 ;;
+    esac
+    echo ""
+    _ask_retention new_val "$label" "$(_s3_var RETAIN_DAYS "$num")"
+    _s3_set RETAIN_DAYS "$num" "$new_val"
+    _s3_set RETAIN_UNIT "$num" "$unit"
+    save_config
+    print_message "SUCCESS" "$(_s3_label "$num"): ${BOLD}$(_retention_display "$new_val" "$unit")${RESET}"
+}
+
 _retention_set_s3() {
     local -a nums=()
-    local n pick target cur new_val i=0
+    local n pick target i=0
     while IFS= read -r n; do nums+=("$n"); done < <(_s3_configured_nums)
     [[ ${#nums[@]} -eq 0 ]] && return 1
     if [[ ${#nums[@]} -eq 1 ]]; then
@@ -1996,7 +2049,7 @@ _retention_set_s3() {
         ui_menu_reset
         for n in "${nums[@]}"; do
             i=$((i + 1))
-            ui_menu_add "$i" "$(_s3_label "$n") ${LIGHT_GRAY}· $(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)${RESET}"
+            ui_menu_add "$i" "$(_s3_label "$n") ${LIGHT_GRAY}· $(_retention_display "$(_s3_var RETAIN_DAYS "$n")" "$(_s3_ret_unit "$n")")${RESET}"
         done
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
@@ -2005,11 +2058,7 @@ _retention_set_s3() {
         target="${nums[$((pick - 1))]}"
         echo ""
     fi
-    cur=$(_s3_var RETAIN_DAYS "$target")
-    _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$target")")" "$cur"
-    _s3_set RETAIN_DAYS "$target" "$new_val"
-    save_config
-    print_message "SUCCESS" "$(_s3_label "$target"): ${BOLD}$(_retention_display "$new_val" days)${RESET}"
+    _s3_ask_retention "$target"
 }
 
 _schedule_status() {
@@ -2025,7 +2074,7 @@ _schedule_status() {
     local -a ret_rows=("$(t ret_on_server)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")
     if [[ "$UPLOAD_METHOD" == "s3" ]]; then
         while IFS= read -r n; do
-            ret_rows+=("$(_s3_label "$n"):" "$(_retention_display "$(_s3_var RETAIN_DAYS "$n")" days)")
+            ret_rows+=("$(_s3_label "$n"):" "$(_retention_display "$(_s3_var RETAIN_DAYS "$n")" "$(_s3_ret_unit "$n")")")
         done < <(_s3_configured_nums)
     else
         ret_rows+=("Telegram:" "$(t ret_tg_keep)")
@@ -2206,10 +2255,12 @@ cleanup_s3_old_backups() {
     fi
 
     local s3_prefix_arg="${s3_prefix:+${s3_prefix}/}"
-    local cutoff_date=$(date -d "-${s3_retain} days" +%Y-%m-%d 2>/dev/null || date -v-${s3_retain}d +%Y-%m-%d 2>/dev/null)
-
-    if [[ -z "$cutoff_date" ]]; then
-        return 0
+    local s3_unit
+    s3_unit=$(_s3_ret_unit "$s3_num")
+    local cutoff_date=""
+    if [[ "$s3_unit" != "count" ]]; then
+        cutoff_date=$(date -d "-${s3_retain} days" +%Y-%m-%d 2>/dev/null || date -v-${s3_retain}d +%Y-%m-%d 2>/dev/null)
+        [[ -z "$cutoff_date" ]] && return 0
     fi
 
     local file_list
@@ -2223,11 +2274,25 @@ cleanup_s3_old_backups() {
         return 0
     fi
 
+    local -A s3_old_by_count=()
+    if [[ "$s3_unit" == "count" ]]; then
+        local old_name
+        while IFS= read -r old_name; do
+            [[ -n "$old_name" ]] && s3_old_by_count["$old_name"]=1
+        done < <(printf '%s\n' "$file_list" | sort -k1,1r -k2,2r | awk -v keep="$s3_retain" 'NR > keep {print $NF}')
+    fi
+
     local deleted_count=0
     while IFS= read -r line; do
         local file_date=$(echo "$line" | awk '{print $1}')
         local file_name=$(echo "$line" | awk '{print $NF}')
-        if [[ "$file_date" < "$cutoff_date" ]]; then
+        local is_old=false
+        if [[ "$s3_unit" == "count" ]]; then
+            [[ -n "${s3_old_by_count[$file_name]:-}" ]] && is_old=true
+        elif [[ "$file_date" < "$cutoff_date" ]]; then
+            is_old=true
+        fi
+        if [[ "$is_old" == true ]]; then
             if AWS_ACCESS_KEY_ID="$s3_access" \
                AWS_SECRET_ACCESS_KEY="$s3_secret" \
                AWS_DEFAULT_REGION="$s3_region" \
@@ -2339,7 +2404,7 @@ test_s3_connection() {
 
 _s3_shift_down() {
     local from_num="$1"
-    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS LIMIT_GB)
+    local fields=(NAME ENDPOINT REGION BUCKET ACCESS_KEY SECRET_KEY PREFIX RETAIN_DAYS RETAIN_UNIT LIMIT_GB)
     local i field value
     for ((i=from_num; i<S3_COUNT; i++)); do
         for field in "${fields[@]}"; do
@@ -2379,7 +2444,7 @@ s3_target_menu() {
         print_message "INFO" "$(t st_s3_access) ${BOLD}${s3_access:+****${s3_access: -4}}${RESET}"
         print_message "INFO" "$(t st_s3_secret) ${BOLD}${s3_secret:+****}${RESET}"
         print_message "INFO" "$(t st_s3_prefix) ${BOLD}${s3_prefix:-$(t root_folder)}${RESET}"
-        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" days)${RESET}"
+        print_message "INFO" "$(t st_retention_s3) ${BOLD}$(_retention_display "$s3_retain" "$(_s3_ret_unit "$s3_num")")${RESET}"
         local s3_limit_gb s3_used_cached
         s3_limit_gb=$(_s3_var LIMIT_GB "$s3_num")
         if [[ "$s3_limit_gb" =~ ^[0-9]+$ && "$s3_limit_gb" -gt 0 ]]; then
@@ -2458,10 +2523,7 @@ s3_target_menu() {
                 print_message "SUCCESS" "$(t st_s3_prefix_ok)"
                 ;;
             8)
-                _ask_retention new_val "$(printf "$(t ret_enter_s3)" "$(_s3_label "$s3_num")")" "$s3_retain"
-                _s3_set RETAIN_DAYS "$s3_num" "$new_val"
-                save_config
-                print_message "SUCCESS" "$(t st_retention_s3_ok)"
+                _s3_ask_retention "$s3_num" || continue
                 ;;
             9)
                 echo -e "   ${LIGHT_GRAY}$(t st_s3_limit_hint)${RESET}"
@@ -2812,7 +2874,139 @@ _encryption_generate_keys() {
     read -rp "$(t press_enter)"
 }
 
+RUN_LOCK_FILE="$INSTALL_DIR/.run.lock"
+_RUN_LOCK_FD=""
+
+_take_run_lock() {
+    command -v flock >/dev/null 2>&1 || return 0
+    [[ -n "$_RUN_LOCK_FD" ]] && return 0
+    [[ -d "$INSTALL_DIR" ]] || return 0
+    exec {_RUN_LOCK_FD}>"$RUN_LOCK_FILE" || { _RUN_LOCK_FD=""; return 0; }
+    if ! flock -n "$_RUN_LOCK_FD"; then
+        exec {_RUN_LOCK_FD}>&-
+        _RUN_LOCK_FD=""
+        return 1
+    fi
+    return 0
+}
+
+_release_run_lock() {
+    [[ -n "$_RUN_LOCK_FD" ]] || return 0
+    flock -u "$_RUN_LOCK_FD" 2>/dev/null || true
+    exec {_RUN_LOCK_FD}>&-
+    _RUN_LOCK_FD=""
+}
+
+_estimate_backup_bytes() {
+    local last=0 dirs=0
+    last=$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'remnawave_backup_*' -printf '%T@ %s\n' 2>/dev/null \
+        | sort -n | tail -n 1 | awk '{print $2+0}')
+    last=$(( ${last:-0} * 3 ))
+    if [[ "$SKIP_PANEL_BACKUP" != "true" ]] && _panel_configured; then
+        dirs=$((dirs + $(_path_bytes "$REMNALABS_ROOT_DIR")))
+    fi
+    if [[ "$BOT_BACKUP_ENABLED" == "true" ]] && _bot_configured; then
+        dirs=$((dirs + $(_path_bytes "$BOT_BACKUP_PATH")))
+    fi
+    dirs=$((dirs + $(_extra_total_bytes)))
+    if [[ $last -gt $dirs ]]; then echo "$last"; else echo "$dirs"; fi
+}
+
+_check_backup_space() {
+    local need avail margin=$((100 * 1024 * 1024))
+    mkdir -p "$BACKUP_DIR"
+    avail=$(df -B1 --output=avail "$BACKUP_DIR" 2>/dev/null | awk 'NR==2 {print $1+0}')
+    [[ -n "$avail" && "$avail" -gt 0 ]] || return 0
+    need=$(( $(_estimate_backup_bytes) + margin ))
+    [[ $avail -ge $need ]] && return 0
+    local msg
+    msg="$(printf "$(t bk_no_space)" "$(_ui_human_size "$avail")" "$(_ui_human_size "$need")")"
+    print_message "ERROR" "$msg"
+    log_write "ERROR" "not enough disk space: free ${avail} B, need ~${need} B"
+    send_telegram_message "❌ $msg" "None" || true
+    return 1
+}
+
 create_backup() {
+    LOG_CATEGORY="backup"
+    if ! _take_run_lock; then
+        print_message "WARN" "$(t bk_locked)"
+        log_write "WARN" "another backup or restore is running, this run is skipped"
+        [[ -t 0 ]] || send_telegram_message "⚠️ $(t bk_locked)" "None" || true
+        return 1
+    fi
+    local rc=0
+    _create_backup_run
+    rc=$?
+    _release_run_lock
+    return $rc
+}
+
+restore_backup() {
+    if ! _take_run_lock; then
+        LOG_CATEGORY="restore"
+        print_message "WARN" "$(t rs_locked)"
+        log_write "WARN" "a backup is running, restore not started"
+        read -rp "$(t press_enter)"
+        return 0
+    fi
+    local rc=0
+    _restore_backup_run
+    rc=$?
+    _release_run_lock
+    return $rc
+}
+
+_run_backup_with_timeout() {
+    local limit="${BACKUP_TIMEOUT_MINUTES:-60}" marker rc=0
+    [[ "$limit" =~ ^[0-9]+$ && "$limit" -gt 0 ]] || limit=60
+    mkdir -p "$BACKUP_DIR"
+    marker=$(mktemp)
+    RWB_IN_TIMEOUT=1 timeout -k 60 "$((limit * 60))" bash "$(readlink -f "$0")" backup || rc=$?
+    if [[ $rc -eq 124 || $rc -eq 137 ]]; then
+        LOG_CATEGORY="backup"
+        find "$BACKUP_DIR" -maxdepth 1 -type f -newer "$marker" -delete 2>/dev/null || true
+        local msg
+        msg="$(printf "$(t bk_timeout)" "$limit")"
+        print_message "ERROR" "$msg"
+        log_write "ERROR" "backup stopped after ${limit} min, unfinished files removed"
+        send_telegram_message "❌ $msg" "None" || true
+    fi
+    rm -f "$marker"
+    exit "$rc"
+}
+
+_verify_backup_parts() {
+    VERIFY_FAIL=""
+    local item f
+    for item in "${BACKUP_ITEMS[@]}"; do
+        f="$BACKUP_DIR/$item"
+        if [[ "$item" == *.gz ]] && ! gzip -t "$f" 2>/dev/null; then
+            VERIFY_FAIL="$item — $(t vf_bad_archive)"
+            return 1
+        fi
+        if [[ "$item" == *.sql.gz ]] && ! zcat "$f" 2>/dev/null | tail -c 1024 | grep -q "dump complete"; then
+            VERIFY_FAIL="$item — $(t vf_incomplete_dump)"
+            return 1
+        fi
+    done
+    return 0
+}
+
+_verify_failed() {
+    ui_spin_stop
+    local msg
+    msg="$(t vf_failed) ${VERIFY_FAIL}"
+    print_message "ERROR" "$msg"
+    log_write "ERROR" "backup check failed: ${VERIFY_FAIL}"
+    local item
+    for item in "${BACKUP_ITEMS[@]}"; do rm -f "$BACKUP_DIR/$item"; done
+    [[ -n "${BACKUP_FILE_FINAL:-}" ]] && rm -f "$BACKUP_DIR/$BACKUP_FILE_FINAL"
+    send_telegram_message "❌ $msg" "None" || true
+    exit 1
+}
+
+_create_backup_run() {
     LOG_CATEGORY="backup"
     log_write "INFO" "=== backup started (v${VERSION}) ==="
     if [[ "$(_backup_mode)" == "none" ]]; then
@@ -2821,6 +3015,7 @@ create_backup() {
         [[ -t 0 ]] || send_telegram_message "❌ $(t bk_nothing)" "None" || true
         return 1
     fi
+    _check_backup_space || return 1
     print_message "INFO" "$(t bk_starting)"
     echo ""
     
@@ -2907,6 +3102,7 @@ create_backup() {
     
     META_BOT_VERSION=""
     create_bot_backup
+    create_extra_backup
     
     if [[ ${#BACKUP_ITEMS[@]} -eq 0 ]]; then
         print_message "ERROR" "$(t bk_no_data)"
@@ -2928,8 +3124,12 @@ BACKUP_VERSION="$VERSION"
 PANEL_VERSION="$REMNAWAVE_VERSION"
 TIMESTAMP="$TIMESTAMP"
 BOT_META_VERSION="$META_BOT_VERSION"
+EXTRA_COUNT="$EXTRA_DONE_COUNT"
 METAEOF
     BACKUP_ITEMS+=("backup_meta.info")
+
+    ui_spin_start "$(t vf_checking)"
+    _verify_backup_parts || _verify_failed
     
     ui_spin_start "$(t bk_packing)"
     if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${BACKUP_ITEMS[@]}"; then
@@ -2942,6 +3142,11 @@ METAEOF
         fi
         exit $STATUS
     fi
+    if ! gzip -t "$BACKUP_DIR/$BACKUP_FILE_FINAL" 2>/dev/null; then
+        VERIFY_FAIL="$BACKUP_FILE_FINAL — $(t vf_bad_archive)"
+        _verify_failed
+    fi
+    print_message "SUCCESS" "$(t vf_ok)"
     
     if [[ "$ENCRYPT_ENABLED" == "true" ]]; then
         ui_spin_start "$(t enc_encrypting)"
@@ -3007,8 +3212,14 @@ METAEOF
         fi
     fi
 
-    local enc_info=""
-    [[ "$ENCRYPT_ENABLED" == "true" ]] && enc_info=$'\n'"• *$(t tg_encryption)* $(t tg_enc_enabled)"
+    local enc_info=$'\n'"• *$(t tg_verified)* $(t tg_verified_ok)"
+    [[ "$ENCRYPT_ENABLED" == "true" ]] && enc_info+=$'\n'"• *$(t tg_encryption)* $(t tg_enc_enabled)"
+    if [[ "${EXTRA_DONE_COUNT:-0}" -gt 0 ]]; then
+        enc_info+=$'\n'"• *$(t tg_extra)* ${EXTRA_DONE_COUNT} · $(_ui_human_size "$EXTRA_DONE_BYTES")"
+    fi
+    if [[ ${#EXTRA_SKIPPED[@]} -gt 0 ]]; then
+        enc_info+=$'\n'"⚠️ $(t tg_extra_skipped) $(printf '%s ' "${EXTRA_SKIPPED[@]}")"
+    fi
     local caption_text="🛠 *Backup & Restore* v${VERSION}"$'\n'"💾 #backup_success"$'\n'"➖➖➖➖➖➖➖➖➖"$'\n'"📨 *$(t tg_bk_success)*${backup_info}${db_mode_info}"$'\n'"• *$(t tg_size)* ${backup_size}"$'\n'"• *$(t tg_date)* ${DATE}${enc_info}"
     
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
@@ -3090,8 +3301,16 @@ METAEOF
     if [[ "${RETAIN_BACKUPS_VALUE:-0}" -le 0 ]]; then
         print_message "INFO" "$(t bk_retention_disabled)"
     else
-        print_message "INFO" "$(printf "$(t bk_retention)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")"
-        if [[ "$RETAIN_BACKUPS_UNIT" == "hours" ]]; then
+        if [[ "$RETAIN_BACKUPS_UNIT" == "count" ]]; then
+            print_message "INFO" "$(printf "$(t bk_retention_count)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" count)")"
+        else
+            print_message "INFO" "$(printf "$(t bk_retention)" "$(_retention_display "$RETAIN_BACKUPS_VALUE" "$RETAIN_BACKUPS_UNIT")")"
+        fi
+        if [[ "$RETAIN_BACKUPS_UNIT" == "count" ]]; then
+            find "$BACKUP_DIR" -maxdepth 1 -type f \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -printf '%T@ %p\n' \
+                | sort -rn | awk -v keep="$RETAIN_BACKUPS_VALUE" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
+                | while IFS= read -r old_file; do rm -f -- "$old_file"; done
+        elif [[ "$RETAIN_BACKUPS_UNIT" == "hours" ]]; then
             find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -mmin +$((RETAIN_BACKUPS_VALUE * 60)) -delete
         else
             find "$BACKUP_DIR" -maxdepth 1 \( -name "remnawave_backup_*.tar.gz" -o -name "remnawave_backup_*.tar.gz.age" \) -mmin +$((RETAIN_BACKUPS_VALUE * 24 * 60)) -delete
@@ -3115,7 +3334,13 @@ METAEOF
                 print_message "INFO" "$(t bk_retention_disabled) (${s3_ret_lbl})"
                 continue
             fi
-            print_message "INFO" "$(printf "$(t bk_s3_retention)" "$(_retention_display "$s3_ret_days" days)") (${s3_ret_lbl})"
+            local s3_ret_unit
+            s3_ret_unit=$(_s3_ret_unit "$s3_ret_num")
+            if [[ "$s3_ret_unit" == "count" ]]; then
+                print_message "INFO" "$(printf "$(t bk_s3_retention_count)" "$(_retention_display "$s3_ret_days" count)") (${s3_ret_lbl})"
+            else
+                print_message "INFO" "$(printf "$(t bk_s3_retention)" "$(_retention_display "$s3_ret_days" days)") (${s3_ret_lbl})"
+            fi
             cleanup_s3_old_backups "$s3_ret_num"
         done < <(_s3_configured_nums)
         print_message "SUCCESS" "$(t bk_s3_retention_ok)"
@@ -3458,7 +3683,7 @@ show_donate_after_restore() {
     return 0
 }
 
-restore_backup() {
+_restore_backup_run() {
     RESTORE_AGE_PUBLIC=""
     LOG_CATEGORY="restore"
     log_write "INFO" "=== restore started (v${VERSION}) ==="
@@ -3782,6 +4007,9 @@ restore_backup() {
             "$(t rs_meta_panel):" "$(_ver_disp "$BACKUP_PANEL_VERSION")"
         )
         [[ -n "${BOT_META_VERSION:-}" ]] && meta_rows+=("$(t rs_meta_bot_ver):" "$(_ver_disp "$BOT_META_VERSION")")
+        if [[ -f "$temp_restore_dir/extra_paths.list" ]]; then
+            meta_rows+=("$(t rs_meta_extra):" "$(grep -c . "$temp_restore_dir/extra_paths.list" || true)")
+        fi
         print_message "INFO" "$(t rs_meta)"
         print_aligned_rows "${meta_rows[@]}"
     else
@@ -3874,6 +4102,15 @@ restore_backup() {
                 return
             fi
         fi
+    fi
+
+    local EXTRA_STATUS=2
+    EXTRA_RESTORED_COUNT=0
+    if restore_extra_files "$temp_restore_dir"; then
+        EXTRA_STATUS=0
+    else
+        local ex_res=$?
+        [[ "$ex_res" == "1" ]] && EXTRA_STATUS=1
     fi
 
     local PANEL_DUMP
@@ -4068,15 +4305,19 @@ restore_backup() {
         telegram_msg+=$'\n'"• *$(t tg_only_panel)*"
     elif [[ "$BOT_STATUS" == "0" ]]; then
         telegram_msg+=$'\n'"• *$(t tg_only_bot)*"
-    else
+    elif [[ "$EXTRA_STATUS" != "0" ]]; then
         telegram_msg+=$'\n'"⚠️ *$(t tg_nothing)*"
     fi
+    if [[ "$EXTRA_STATUS" == "0" ]]; then
+        telegram_msg+=$'\n'"• *$(t tg_extra)* ${EXTRA_RESTORED_COUNT}"
+    fi
 
-    if [[ "$PANEL_STATUS" == "0" || "$BOT_STATUS" == "0" ]]; then
+    if [[ "$PANEL_STATUS" == "0" || "$BOT_STATUS" == "0" || "$EXTRA_STATUS" == "0" ]]; then
         local donate_qr_file
         donate_qr_file=$(prepare_donate_qr "$PANEL_STATUS" "$BOT_STATUS")
         echo ""
         print_message "SUCCESS" "${BOLD}$(t rs_complete)${RESET}"
+        [[ "$EXTRA_STATUS" == "0" ]] && print_message "INFO" "$(t ex_rs_restart)"
         show_donate_after_restore "$PANEL_STATUS" "$BOT_STATUS" "$donate_qr_file"
         [[ -n "$donate_qr_file" ]] && rm -f "$donate_qr_file"
         offer_enable_encryption_after_restore
@@ -4603,6 +4844,21 @@ _bot_folder_for() {
     esac
 }
 
+_bot_display_name() {
+    local key
+    case "$1" in
+        "Бот от Иисуса") key=bot_jesus ;;
+        "Приватный бот от Иисуса") key=bot_jesus_priv ;;
+        "Бот от Мачки") key=bot_machka ;;
+        "Бот от Snoups") key=bot_snoups ;;
+        "Бот Minishop") key=bot_minishop ;;
+        *) printf '%s' "$1"; return 0 ;;
+    esac
+    local label
+    label="$(t "$key")"
+    printf '%s' "${label% (*}"
+}
+
 _panel_configured() { [[ -n "$REMNALABS_ROOT_DIR" && "$REMNALABS_ROOT_DIR" != "none" ]]; }
 _bot_configured() { [[ -n "$BOT_BACKUP_SELECTED" && -n "$BOT_BACKUP_PATH" ]]; }
 
@@ -4962,7 +5218,7 @@ settings_bot() {
             echo ""
         fi
         print_aligned_rows \
-            "$(t bot_label)" "${GREEN}${BOT_BACKUP_SELECTED}" \
+            "$(t bot_label)" "${GREEN}$(_bot_display_name "$BOT_BACKUP_SELECTED")" \
             "$(t bot_path_label)" "$BOT_BACKUP_PATH" \
             "$(t bot_db_user_label)" "$BOT_BACKUP_DB_USER"
         echo ""
@@ -4983,7 +5239,7 @@ settings_bot() {
                 BOT_BACKUP_SELECTED="$new_bot"
                 BOT_BACKUP_PATH="$new_path"
                 save_config
-                print_message "SUCCESS" "$(t bot_changed) ${BOLD}${BOT_BACKUP_SELECTED}${RESET}"
+                print_message "SUCCESS" "$(t bot_changed) ${BOLD}$(_bot_display_name "$BOT_BACKUP_SELECTED")${RESET}"
                 ;;
             2)
                 local new_path
@@ -5007,6 +5263,314 @@ settings_bot() {
     done
 }
 
+_extra_list() {
+    local IFS='|' p
+    for p in $EXTRA_PATHS; do
+        [[ -n "$p" ]] && printf '%s\n' "$p"
+    done
+    return 0
+}
+
+_extra_count() {
+    _extra_list | grep -c . || true
+}
+
+_extra_set() {
+    local IFS='|'
+    EXTRA_PATHS="$*"
+}
+
+_path_bytes() {
+    local b
+    b=$(du -sb -- "$1" 2>/dev/null | awk '{print $1+0}')
+    echo "${b:-0}"
+}
+
+_extra_total_bytes() {
+    local p sum=0 b
+    while IFS= read -r p; do
+        b=$(_path_bytes "$p")
+        sum=$((sum + ${b:-0}))
+    done < <(_extra_list)
+    echo "$sum"
+}
+
+_path_within() {
+    [[ "$1" == "$2" || "$1" == "$2"/* ]]
+}
+
+_extra_check_path() {
+    local p="$1" sys owned existing
+    if [[ "$p" != /* ]]; then
+        print_message "ERROR" "$(t cfg_path_abs)"; return 1
+    fi
+    local bad_chars='["$`\\|]'
+    if [[ "$p" =~ $bad_chars ]]; then
+        print_message "ERROR" "$(t ex_bad_chars)"; return 1
+    fi
+    if [[ ! -e "$p" ]]; then
+        print_message "ERROR" "$(t ex_not_found) ${BOLD}$p${RESET}"; return 1
+    fi
+    for sys in / /proc /sys /dev /run /boot /usr /bin /sbin /lib /lib64 /var/lib/docker; do
+        if [[ "$p" == "$sys" ]] || { [[ "$sys" != "/" ]] && _path_within "$p" "$sys"; }; then
+            print_message "ERROR" "$(t ex_system_path) ${BOLD}$p${RESET}"; return 1
+        fi
+    done
+    for owned in "$INSTALL_DIR" "$BACKUP_DIR"; do
+        if _path_within "$p" "$owned" || _path_within "$owned" "$p"; then
+            print_message "ERROR" "$(t ex_own_path)"; return 1
+        fi
+    done
+    if _panel_configured && { _path_within "$p" "$REMNALABS_ROOT_DIR" || _path_within "$REMNALABS_ROOT_DIR" "$p"; }; then
+        print_message "ERROR" "$(t ex_in_panel)"; return 1
+    fi
+    if _bot_configured && { _path_within "$p" "$BOT_BACKUP_PATH" || _path_within "$BOT_BACKUP_PATH" "$p"; }; then
+        print_message "ERROR" "$(t ex_in_bot)"; return 1
+    fi
+    while IFS= read -r existing; do
+        if _path_within "$p" "$existing" || _path_within "$existing" "$p"; then
+            print_message "ERROR" "$(t ex_overlap) ${BOLD}$existing${RESET}"; return 1
+        fi
+    done < <(_extra_list)
+    return 0
+}
+
+_extra_suggestions() {
+    local c existing skip
+    for c in /etc/nginx /etc/letsencrypt /root/.acme.sh /etc/caddy /opt/caddy /etc/haproxy /opt/remnanode /etc/fail2ban; do
+        [[ -e "$c" ]] || continue
+        skip=false
+        while IFS= read -r existing; do
+            if _path_within "$c" "$existing" || _path_within "$existing" "$c"; then skip=true; fi
+        done < <(_extra_list)
+        _panel_configured && _path_within "$c" "$REMNALABS_ROOT_DIR" && skip=true
+        [[ "$skip" == false ]] && printf '%s\n' "$c"
+    done
+    return 0
+}
+
+_extra_add() {
+    local -a sugg=()
+    local s choice new_path i=0 bytes _ex_ans
+    while IFS= read -r s; do sugg+=("$s"); done < <(_extra_suggestions)
+    print_message "ACTION" "$(t ex_add_title)"
+    ui_menu_reset
+    for s in "${sugg[@]}"; do
+        i=$((i + 1))
+        ui_menu_add "$i" "$s ${LIGHT_GRAY}· $(_ui_human_size "$(_path_bytes "$s")")${RESET}"
+    done
+    ui_menu_add "$((i + 1))" "$(t custom_path)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    while true; do
+        ui_menu_choose choice
+        if [[ "$choice" == "0" ]]; then
+            return 1
+        elif [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le ${#sugg[@]} ]]; then
+            new_path="${sugg[$((choice - 1))]}"
+        elif [[ "$choice" == "$((i + 1))" ]]; then
+            echo ""
+            ui_input new_path "$(t ex_enter_path)" "/etc/nginx"
+            new_path="${new_path%/}"
+            [[ -z "$new_path" ]] && continue
+        else
+            continue
+        fi
+        _extra_check_path "$new_path" || continue
+        bytes=$(_path_bytes "$new_path")
+        if [[ "${bytes:-0}" -gt $((1024 * 1024 * 1024)) ]]; then
+            print_message "WARN" "$(printf "$(t ex_big)" "$(_ui_human_size "$bytes")")"
+            ui_confirm _ex_ans "$(t ex_big_q)"
+            [[ "$_ex_ans" == "y" ]] || continue
+        fi
+        local -a cur=()
+        mapfile -t cur < <(_extra_list)
+        cur+=("$new_path")
+        _extra_set "${cur[@]}"
+        save_config
+        print_message "SUCCESS" "$(t ex_added) ${BOLD}${new_path}${RESET}"
+        return 0
+    done
+}
+
+_extra_remove() {
+    local -a cur=()
+    local p choice i=0
+    mapfile -t cur < <(_extra_list)
+    [[ ${#cur[@]} -eq 0 ]] && return 1
+    print_message "ACTION" "$(t ex_remove_title)"
+    ui_menu_reset
+    for p in "${cur[@]}"; do
+        i=$((i + 1))
+        ui_menu_add "$i" "$p"
+    done
+    ui_menu_gap
+    ui_menu_add 0 "$(t back)"
+    ui_menu_choose choice
+    [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le ${#cur[@]} ]] || return 1
+    p="${cur[$((choice - 1))]}"
+    unset 'cur[choice-1]'
+    _extra_set "${cur[@]}"
+    save_config
+    print_message "SUCCESS" "$(t ex_removed) ${BOLD}${p}${RESET}"
+}
+
+settings_extra() {
+    local choice p n
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t ex_title)${RESET}"
+        echo ""
+        echo -e "   ${LIGHT_GRAY}$(t ex_hint)${RESET}"
+        echo ""
+        n=$(_extra_count)
+        if [[ "$n" -eq 0 ]]; then
+            echo -e "   ${LIGHT_GRAY}$(t ex_empty)${RESET}"
+        else
+            local -a rows=()
+            while IFS= read -r p; do
+                if [[ -e "$p" ]]; then
+                    rows+=("$p" "$(_ui_human_size "$(_path_bytes "$p")")")
+                else
+                    rows+=("$p" "${YELLOW}$(t ex_missing_now)")
+                fi
+            done < <(_extra_list)
+            print_aligned_rows "${rows[@]}"
+        fi
+        echo ""
+        ui_menu_reset
+        ui_menu_add 1 "$(t ex_menu_add)"
+        [[ "$n" -gt 0 ]] && ui_menu_add 2 "$(t ex_menu_remove)"
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        echo ""
+        case "$choice" in
+            1) _extra_add || continue ;;
+            2) [[ "$n" -gt 0 ]] || continue; _extra_remove || continue ;;
+            0) return ;;
+            *) continue ;;
+        esac
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+create_extra_backup() {
+    EXTRA_DONE_COUNT=0
+    EXTRA_DONE_BYTES=0
+    EXTRA_SKIPPED=()
+    local -a rels=() included=()
+    local p
+    while IFS= read -r p; do
+        if [[ -e "$p" ]]; then
+            included+=("$p")
+            rels+=("${p#/}")
+        else
+            EXTRA_SKIPPED+=("$p")
+            print_message "WARN" "$(t ex_skipped) ${BOLD}$p${RESET}"
+            log_write "WARN" "extra path missing, skipped: $p"
+        fi
+    done < <(_extra_list)
+    [[ ${#included[@]} -eq 0 ]] && return 0
+
+    local archive="extra_${TIMESTAMP}.tar.gz"
+    ui_spin_start "$(t ex_archiving)"
+    local rc=0
+    tar --warning=no-file-changed --numeric-owner -czpf "$BACKUP_DIR/$archive" -C / -- "${rels[@]}" || rc=$?
+    if [[ $rc -ge 2 ]]; then
+        ui_spin_stop
+        rm -f "$BACKUP_DIR/$archive"
+        print_message "ERROR" "$(t ex_arch_err) $rc"
+        log_write "ERROR" "extra paths archive failed: tar exit $rc"
+        EXTRA_SKIPPED+=("${included[@]}")
+        return 0
+    fi
+    printf '%s\n' "${included[@]}" > "$BACKUP_DIR/extra_paths.list"
+    BACKUP_ITEMS+=("$archive" "extra_paths.list")
+    EXTRA_DONE_COUNT=${#included[@]}
+    for p in "${included[@]}"; do
+        EXTRA_DONE_BYTES=$((EXTRA_DONE_BYTES + $(_path_bytes "$p")))
+    done
+    print_message "SUCCESS" "$(printf "$(t ex_arch_ok)" "$EXTRA_DONE_COUNT")"
+    echo ""
+}
+
+restore_extra_files() {
+    local dir="$1" archive list
+    archive=$(find "$dir" -maxdepth 1 -name "extra_*.tar.gz" | head -n 1)
+    list="$dir/extra_paths.list"
+    [[ -n "$archive" && -f "$list" ]] || return 2
+
+    local -a paths=() chosen=()
+    mapfile -t paths < <(grep . "$list")
+    [[ ${#paths[@]} -eq 0 ]] && return 2
+
+    echo ""
+    print_message "INFO" "$(t ex_rs_found)"
+    local p
+    for p in "${paths[@]}"; do
+        echo -e "   ${BOLD}$p${RESET}"
+    done
+    echo ""
+    local choice
+    ui_menu_reset
+    ui_menu_add 1 "$(t ex_rs_all)"
+    ui_menu_add 2 "$(t ex_rs_pick)"
+    ui_menu_gap
+    ui_menu_add 0 "$(t ex_rs_skip)"
+    ui_menu_choose choice
+    echo ""
+    case "$choice" in
+        1) chosen=("${paths[@]}") ;;
+        2)
+            local _ex_ans
+            for p in "${paths[@]}"; do
+                ui_confirm _ex_ans "$(printf "$(t ex_rs_one_q)" "$p")"
+                [[ "$_ex_ans" == "y" ]] && chosen+=("$p")
+            done
+            echo ""
+            ;;
+        *)
+            print_message "INFO" "$(t ex_rs_skipped)"
+            return 2
+            ;;
+    esac
+    if [[ ${#chosen[@]} -eq 0 ]]; then
+        print_message "INFO" "$(t ex_rs_skipped)"
+        return 2
+    fi
+
+    local pre="$INSTALL_DIR/pre-restore/$(date +%Y-%m-%d_%H_%M_%S)"
+    local rel ok=0 failed=0 saved=false
+    for p in "${chosen[@]}"; do
+        rel="${p#/}"
+        if [[ -e "$p" || -L "$p" ]]; then
+            mkdir -p "$pre/$(dirname "$rel")"
+            if ! mv -- "$p" "$pre/$rel"; then
+                print_message "ERROR" "$(t ex_rs_fail) ${BOLD}$p${RESET}"
+                failed=$((failed + 1))
+                continue
+            fi
+            saved=true
+        fi
+        if tar --numeric-owner -xzpf "$archive" -C / -- "$rel"; then
+            print_message "SUCCESS" "$(t ex_rs_ok) ${BOLD}$p${RESET}"
+            ok=$((ok + 1))
+        else
+            print_message "ERROR" "$(t ex_rs_fail) ${BOLD}$p${RESET}"
+            rm -rf -- "$p"
+            [[ -e "$pre/$rel" || -L "$pre/$rel" ]] && mv -- "$pre/$rel" "$p"
+            failed=$((failed + 1))
+        fi
+    done
+    [[ "$saved" == true ]] && print_message "INFO" "$(t ex_rs_saved_old) ${BOLD}$pre${RESET}"
+    EXTRA_RESTORED_COUNT=$ok
+    [[ $failed -gt 0 ]] && return 1
+    [[ $ok -gt 0 ]] && return 0
+    return 2
+}
+
 menu_what_to_backup() {
     local choice mode panel_val bot_val
     while true; do
@@ -5028,22 +5592,31 @@ menu_what_to_backup() {
         if ! _bot_configured; then
             bot_val="${LIGHT_GRAY}$(t wb_not_set)"
         elif [[ "$BOT_BACKUP_ENABLED" != "true" ]]; then
-            bot_val="${LIGHT_GRAY}$(t wb_not_included) · ${BOT_BACKUP_SELECTED}"
+            bot_val="${LIGHT_GRAY}$(t wb_not_included) · $(_bot_display_name "$BOT_BACKUP_SELECTED")"
         else
-            bot_val="${BOT_BACKUP_SELECTED} · ${BOT_BACKUP_PATH}"
+            bot_val="$(_bot_display_name "$BOT_BACKUP_SELECTED") · ${BOT_BACKUP_PATH}"
         fi
 
         local mode_val="${GREEN}$(_backup_mode_label "$mode")"
         [[ "$mode" == "none" ]] && mode_val="${RED}$(_backup_mode_label none)"
+        local extra_n extra_val
+        extra_n=$(_extra_count)
+        if [[ "$extra_n" -gt 0 ]]; then
+            extra_val="$(printf "$(t ex_summary)" "$extra_n" "$(_plural "$extra_n" "$(t ex_path_1)" "$(t ex_path_2)" "$(t ex_path_5)")" "$(_ui_human_size "$(_extra_total_bytes)")")"
+        else
+            extra_val="${LIGHT_GRAY}$(t ex_none)"
+        fi
         print_aligned_rows \
             "$(t wb_mode)" "$mode_val" \
             "$(t wb_panel)" "$panel_val" \
-            "$(t wb_bot)" "$bot_val"
+            "$(t wb_bot)" "$bot_val" \
+            "$(t wb_extra)" "$extra_val"
         echo ""
         ui_menu_reset
         ui_menu_add 1 "$(t wb_menu_panel)"
         ui_menu_add 2 "$(t wb_menu_bot)"
         ui_menu_add 3 "$(t wb_menu_mode)"
+        ui_menu_add 4 "$(t wb_menu_extra)"
         ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
@@ -5051,6 +5624,7 @@ menu_what_to_backup() {
             1) settings_panel ;;
             2) settings_bot ;;
             3) backup_mode_menu ;;
+            4) settings_extra ;;
             0) return ;;
         esac
     done
@@ -5271,9 +5845,9 @@ show_status_card() {
     esac
 
     case "$(_backup_mode)" in
-        both)  bot_val="${BOLD}$(t bm_panel_short) + ${BOT_BACKUP_SELECTED}" ;;
+        both)  bot_val="${BOLD}$(t bm_panel_short) + $(_bot_display_name "$BOT_BACKUP_SELECTED")" ;;
         panel) bot_val="${BOLD}$(t bm_panel)" ;;
-        bot)   bot_val="${BOLD}${BOT_BACKUP_SELECTED}" ;;
+        bot)   bot_val="${BOLD}$(_bot_display_name "$BOT_BACKUP_SELECTED")" ;;
         *)     bot_val="${RED}$(t bm_none)" ;;
     esac
 
@@ -5298,7 +5872,7 @@ show_status_card() {
         while IFS= read -r s3_num; do
             s3_bytes=$(_s3_cached_usage "$s3_num")
             s3_limit=$(_s3_limit_bytes "$s3_num")
-            s3_keep="$(printf "$(t usage_keep)" "$(_retention_short "$(_s3_var RETAIN_DAYS "$s3_num")" days)")"
+            s3_keep="$(printf "$(t usage_keep)" "$(_retention_short "$(_s3_var RETAIN_DAYS "$s3_num")" "$(_s3_ret_unit "$s3_num")")")"
             if [[ -n "$s3_bytes" ]]; then
                 rows+=("$(_s3_label "$s3_num")" "$(_usage_color "$s3_bytes" "$s3_limit")$(_usage_text "$s3_bytes" "$s3_limit")${LIGHT_GRAY}${s3_keep}")
             elif [[ -n "$s3_limit" ]]; then
@@ -5382,7 +5956,11 @@ if [[ -z "$1" ]]; then
 elif [[ "$1" == "backup" ]]; then
     load_or_create_config
     migrate_cron_log_path
-    create_backup
+    if [[ -z "${RWB_IN_TIMEOUT:-}" ]] && command -v timeout >/dev/null 2>&1; then
+        _run_backup_with_timeout
+    else
+        create_backup
+    fi
 elif [[ "$1" == "restore" ]]; then
     load_or_create_config
     migrate_cron_log_path
