@@ -214,6 +214,7 @@ L[bk_s3_err_tg]="Failed to upload backup to S3 Storage."
 L[bk_s3_notify_ok]="Backup success notification sent to Telegram."
 L[bk_s3_notify_fail]="Failed to send notification to Telegram."
 L[bk_s3_retention]="Deleting S3 backups older than %s..."
+L[bk_s3_cleanup_skipped]="The backup was not uploaded here, so old backups are kept"
 L[bk_s3_retention_ok]="S3 cleanup completed."
 L[bk_s3_targets]="Status per target:"
 
