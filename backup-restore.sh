@@ -5,13 +5,15 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.17"
+VERSION="4.2.18"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 LOG_DIR="$INSTALL_DIR/logs"
 LOG_CATEGORY="system"
 LOG_MAX_BYTES=5242880
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
 CONFIG_FILE="$INSTALL_DIR/config.env"
 SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
@@ -2301,6 +2303,14 @@ _schedule_status() {
     print_aligned_rows "${ret_rows[@]}"
 }
 
+_s3_was_uploaded() {
+    local n
+    for n in "${S3_UPLOADED_NUMS[@]}"; do
+        [[ "$n" == "$1" ]] && return 0
+    done
+    return 1
+}
+
 _s3_configured_nums() {
     local count="${S3_COUNT:-1}"
     local i
@@ -2457,7 +2467,7 @@ send_s3_document() {
          AWS_SECRET_ACCESS_KEY="$s3_secret" \
          AWS_DEFAULT_REGION="$s3_region" \
          aws s3 cp "$file_path" "s3://${s3_bucket}/${s3_key}" \
-         $s3_endpoint_arg --quiet 2>&1); then
+         $s3_endpoint_arg --only-show-errors 2>&1); then
         print_message "SUCCESS" "$(t s3_upload_ok) (${s3_label})"
         return 0
     fi
@@ -3312,6 +3322,7 @@ _create_backup_run() {
     
     BACKUP_ITEMS=()
     BACKUP_WARNINGS=()
+    S3_UPLOADED_NUMS=()
     
     if [[ "$SKIP_PANEL_BACKUP" == "true" ]]; then
         print_message "INFO" "$(t bk_skip_panel)"
@@ -3539,6 +3550,7 @@ METAEOF
                 ui_spin_start "$(t bk_sending) (${s3_lbl})..."
                 if send_s3_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$s3_num"; then
                     s3_ok_labels+=("$s3_lbl")
+                    S3_UPLOADED_NUMS+=("$s3_num")
                 else
                     s3_fail_labels+=("$s3_lbl")
                 fi
@@ -3616,6 +3628,10 @@ METAEOF
                 continue
             fi
             local s3_ret_lbl=$(_s3_label "$s3_ret_num")
+            if ! _s3_was_uploaded "$s3_ret_num"; then
+                print_message "WARN" "$(t bk_s3_cleanup_skipped) (${s3_ret_lbl})"
+                continue
+            fi
             local s3_ret_days=$(_s3_var RETAIN_DAYS "$s3_ret_num")
             s3_ret_days="${s3_ret_days:-30}"
             if [[ "$s3_ret_days" -le 0 ]]; then
