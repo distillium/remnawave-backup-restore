@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.2.18"
+VERSION="4.2.19"
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
@@ -641,6 +641,64 @@ _remove_volume_if_exists() {
     return 0
 }
 
+_dump_pg_version() {
+    local f="$1"
+    { if [[ "$f" == *.gz ]]; then gunzip -c "$f" 2>/dev/null; else cat "$f" 2>/dev/null; fi; } \
+        | head -n 2000 | sed -n 's/^-- Dumped by pg_dump.* version \([0-9][0-9.]*\).*/\1/p' | head -n 1
+}
+
+_dump_has_restrict() {
+    local f="$1"
+    { if [[ "$f" == *.gz ]]; then gunzip -c "$f" 2>/dev/null; else cat "$f" 2>/dev/null; fi; } \
+        | head -n 2000 | grep -q '^\\restrict '
+}
+
+_psql_knows_restrict() {
+    local major="${1%%.*}" minor="${1#*.}"
+    minor="${minor%%.*}"; [[ "$minor" =~ ^[0-9]+$ ]] || minor=0
+    case "$major" in
+        13) [[ $minor -ge 22 ]] ;;
+        14) [[ $minor -ge 19 ]] ;;
+        15) [[ $minor -ge 14 ]] ;;
+        16) [[ $minor -ge 10 ]] ;;
+        17) [[ $minor -ge 6 ]] ;;
+        *) [[ "$major" =~ ^[0-9]+$ && $major -ge 18 ]] ;;
+    esac
+}
+
+_compose_service_image() {
+    docker compose config --format json 2>/dev/null | jq -r --arg s "$1" '.services[$s].image // empty' 2>/dev/null
+}
+
+_image_pg_version() {
+    docker run --rm --entrypoint postgres "$1" -V 2>/dev/null | sed -n 's/.*PostgreSQL) \([0-9][0-9.]*\).*/\1/p' | head -n 1
+}
+
+_pg_restore_compat_check() {
+    local label="$1" dump="$2" dir="$3" svc="$4" dump_ver image target_ver problem=""
+    dump_ver=$(_dump_pg_version "$dump")
+    image=$( cd "$dir" 2>/dev/null && _compose_service_image "$svc" )
+    [[ -n "$image" ]] && target_ver=$(_image_pg_version "$image")
+    [[ -n "$dump_ver" && -n "$target_ver" ]] || return 0
+    print_message "INFO" "$(printf "$(t rs_pg_versions)" "$label" "$dump_ver" "$target_ver")"
+    if [[ "${dump_ver%%.*}" -gt "${target_ver%%.*}" ]]; then
+        problem="$(printf "$(t rs_pg_older)" "$label" "$dump_ver" "$target_ver")"
+    elif _dump_has_restrict "$dump" && ! _psql_knows_restrict "$target_ver"; then
+        problem="$(printf "$(t rs_pg_restrict)" "$target_ver")"
+    fi
+    [[ -z "$problem" ]] && return 0
+    print_message "WARN" "$problem"
+    local _pgc_ans
+    ui_confirm _pgc_ans "$(t rs_pg_continue)"
+    if [[ "$_pgc_ans" == "y" ]]; then
+        log_write "WARN" "restore of $label: $problem (continued by user)"
+        return 0
+    fi
+    print_message "INFO" "$(printf "$(t rs_pg_skipped)" "$label")"
+    log_write "WARN" "restore of $label skipped: $problem"
+    return 1
+}
+
 _wait_container_healthy() {
     local container="$1" waited=0 st
     while true; do
@@ -1034,15 +1092,22 @@ restore_bot_backup() {
         return 0
     fi
 
+    if [[ "$bot_restore_scope" != "ai" && -n "$BOT_DUMP_FILE" ]]; then
+        if ! _pg_restore_compat_check "$(t rs_pg_lbl_bot)" "$BOT_DUMP_FILE" "$restore_path" "$BOT_SERVICE_NAME"; then
+            return 1
+        fi
+    fi
+
     if [[ "$bot_restore_scope" != "ai" ]]; then
         print_message "INFO" "$(t rbot_check_vol)"
-        local -a bot_volumes=("$BOT_VOLUME_NAME")
+        local -a bot_volumes=()
         local _rv
         if cd "$restore_path" 2>/dev/null; then
             while IFS= read -r _rv; do
-                if [[ -n "$_rv" && "$_rv" != "$BOT_VOLUME_NAME" ]]; then bot_volumes+=("$_rv"); fi
+                [[ -n "$_rv" ]] && bot_volumes+=("$_rv")
             done < <(_compose_pg_volumes "$BOT_SERVICE_NAME")
         fi
+        [[ ${#bot_volumes[@]} -eq 0 ]] && bot_volumes=("$BOT_VOLUME_NAME")
         local bot_vol_found=false
         for _rv in "${bot_volumes[@]}"; do
             if _remove_volume_if_exists "$_rv"; then bot_vol_found=true; fi
@@ -1070,20 +1135,11 @@ restore_bot_backup() {
     
         echo ""
         print_message "INFO" "$(t rbot_wait_db)"
-        local wait_count=0
-        local max_wait=60
-    
-        until [ "$(docker inspect --format='{{.State.Health.Status}}' "$BOT_CONTAINER_NAME" 2>/dev/null)" == "healthy" ]; do
-            sleep 2
-            echo -n "."
-            wait_count=$((wait_count + 1))
-            if [ $wait_count -gt $max_wait ]; then
-                echo ""
-                print_message "ERROR" "$(t rbot_db_timeout)"
-                return 1
-            fi
-        done
-        echo ""
+        if ! _wait_container_healthy "$BOT_CONTAINER_NAME"; then
+            print_message "ERROR" "$(t rbot_db_timeout)"
+            docker logs --tail 15 "$BOT_CONTAINER_NAME" 2>&1 | sed 's/^/   /'
+            return 1
+        fi
         print_message "SUCCESS" "$(t rbot_db_ready)"
     
         if [[ -n "$BOT_DUMP_FILE" ]]; then
@@ -1138,11 +1194,15 @@ restore_bot_backup() {
             echo ""
             print_message "INFO" "$(t rbot_ai_restoring)"
 
-            local -a ai_volumes=("$AI_FALLBACK_VOLUME")
+            if ! _pg_restore_compat_check "$(t rs_pg_lbl_ai)" "$AI_DUMP_FILE" "$restore_path" "$AI_SERVICE"; then
+                return 1
+            fi
+            local -a ai_volumes=()
             local _av
             while IFS= read -r _av; do
-                if [[ -n "$_av" && "$_av" != "$AI_FALLBACK_VOLUME" ]]; then ai_volumes+=("$_av"); fi
+                [[ -n "$_av" ]] && ai_volumes+=("$_av")
             done < <(_compose_pg_volumes "$AI_SERVICE")
+            [[ ${#ai_volumes[@]} -eq 0 ]] && ai_volumes=("$AI_FALLBACK_VOLUME")
             for _av in "${ai_volumes[@]}"; do
                 _remove_volume_if_exists "$_av" || true
             done
@@ -2462,15 +2522,24 @@ send_s3_document() {
     aws s3 ls "s3://${s3_bucket}/" \
     $s3_endpoint_arg >/dev/null 2>&1 || true
 
-    local s3_upload_output
-    if s3_upload_output=$(AWS_ACCESS_KEY_ID="$s3_access" \
-         AWS_SECRET_ACCESS_KEY="$s3_secret" \
-         AWS_DEFAULT_REGION="$s3_region" \
-         aws s3 cp "$file_path" "s3://${s3_bucket}/${s3_key}" \
-         $s3_endpoint_arg --only-show-errors 2>&1); then
-        print_message "SUCCESS" "$(t s3_upload_ok) (${s3_label})"
-        return 0
-    fi
+    local s3_upload_output attempt max_attempts=3
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if s3_upload_output=$(AWS_ACCESS_KEY_ID="$s3_access" \
+             AWS_SECRET_ACCESS_KEY="$s3_secret" \
+             AWS_DEFAULT_REGION="$s3_region" \
+             aws s3 cp "$file_path" "s3://${s3_bucket}/${s3_key}" \
+             $s3_endpoint_arg --only-show-errors 2>&1); then
+            print_message "SUCCESS" "$(t s3_upload_ok) (${s3_label})"
+            return 0
+        fi
+        if [[ $attempt -lt $max_attempts ]]; then
+            ui_spin_stop
+            print_message "WARN" "$(printf "$(t s3_upload_retry)" "$attempt" "$max_attempts") (${s3_label})"
+            log_write "WARN" "S3 ${s3_label}: upload attempt ${attempt} failed: $(head -c 300 <<< "$s3_upload_output" | tr '\n' ' ')"
+            sleep 30
+            ui_spin_start "$(printf "$(t s3_upload_attempt)" "$((attempt + 1))" "$max_attempts") (${s3_label})..."
+        fi
+    done
 
     print_message "ERROR" "$(t s3_upload_err) (${s3_label})"
     _s3_print_diagnosis "$s3_upload_output" "$s3_bucket" "$s3_region" "$s3_endpoint"
@@ -4510,16 +4579,33 @@ _restore_backup_run() {
                 fi
             else
                 if [[ "$DB_CONNECTION_TYPE" == "docker" ]]; then
-                    docker volume rm remnawave-db-data 2>/dev/null || true
+                    if [[ -n "$PANEL_DUMP" ]] && ! _pg_restore_compat_check "$(t rs_pg_lbl_panel)" "$PANEL_DUMP" "$REMNALABS_ROOT_DIR" "remnawave-db"; then
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
                     cd "$REMNALABS_ROOT_DIR" || { print_message "ERROR" "$(t rs_dir_missing)"; return; }
+                    local -a panel_vols=()
+                    local _pv
+                    while IFS= read -r _pv; do
+                        [[ -n "$_pv" ]] && panel_vols+=("$_pv")
+                    done < <(_compose_pg_volumes "remnawave-db")
+                    [[ ${#panel_vols[@]} -eq 0 ]] && panel_vols=("remnawave-db-data")
+                    docker compose stop remnawave-db >/dev/null 2>&1 || true
+                    docker compose rm -f remnawave-db >/dev/null 2>&1 || true
+                    for _pv in "${panel_vols[@]}"; do
+                        docker volume rm "$_pv" >/dev/null 2>&1 || true
+                    done
                     docker compose up -d remnawave-db
 
                     print_message "INFO" "$(t rs_wait_db)"
-                    until [[ "$(docker inspect --format='{{.State.Health.Status}}' remnawave-db)" == "healthy" ]]; do
-                        sleep 2
-                        echo -n "."
-                    done
-                    echo ""
+                    if ! _wait_container_healthy "remnawave-db"; then
+                        print_message "ERROR" "$(t rs_db_timeout)"
+                        docker logs --tail 15 remnawave-db 2>&1 | sed 's/^/   /'
+                        rm -rf "$temp_restore_dir"
+                        read -rp "$(t press_enter_back)"
+                        return 1
+                    fi
                 else
                     print_message "INFO" "$(t rs_check_ext)"
                     local pg_image=$(get_postgres_image)
@@ -5887,6 +5973,444 @@ restore_extra_files() {
     return 2
 }
 
+PG_LATEST_MAJOR=19
+PGU_DIR="$INSTALL_DIR/pg-upgrade"
+
+_compose_file_in() {
+    local f
+    for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+        [[ -f "$1/$f" ]] && { echo "$1/$f"; return 0; }
+    done
+    return 1
+}
+
+_pgu_running_major() {
+    local user
+    user=$(_container_pg_identity "$1" | awk '{print $1}')
+    docker exec "$1" psql -U "$user" -d postgres -tAc 'SHOW server_version_num' 2>/dev/null \
+        | tr -dc '0-9' | awk '{ if ($1 != "") print int($1 / 10000) }'
+}
+
+_pgu_new_image() {
+    local img="$1" target="$2" repo tag sfx
+    if [[ "$img" == *:* && "${img##*:}" != */* ]]; then
+        repo="${img%:*}"; tag="${img##*:}"
+    else
+        repo="$img"; tag="latest"
+    fi
+    case "$repo" in
+        postgres|library/postgres|docker.io/library/postgres|docker.io/postgres)
+            if [[ "$tag" =~ ^[0-9]+(\.[0-9]+)?(-.+)?$ ]]; then
+                sfx="${BASH_REMATCH[2]}"
+                case "$sfx" in
+                    -alpine*) sfx="-alpine" ;;
+                    -bookworm|-trixie) ;;
+                    *) sfx="" ;;
+                esac
+                echo "${repo}:${target}${sfx}"
+            fi
+            ;;
+        pgvector/pgvector|docker.io/pgvector/pgvector)
+            if [[ "$tag" =~ pg[0-9]+ ]]; then
+                echo "${repo}:pg${target}${tag#*pg[0-9][0-9]}"
+            fi
+            ;;
+    esac
+}
+
+_pgu_edit_compose() {
+    awk -v svc="$3" -v newimg="$4" -v addpg="$5" '
+        function indent(s) { match(s, /^ */); return RLENGTH }
+        function sp(k,   r) { r = ""; while (k-- > 0) r = r " "; return r }
+        BEGIN { in_svc = 0; img_done = 0; env_done = 0; env_line = 0; bad = 0; n = 0 }
+        {
+            line = $0
+            stripped = line; sub(/^ +/, "", stripped)
+            ind = indent(line)
+            is_blank = (stripped == "" || substr(stripped, 1, 1) == "#")
+
+            if (!in_svc && stripped ~ ("^" svc ":[ \t]*$") && ind > 0) {
+                in_svc = 1; svc_ind = ind; out[++n] = line; next
+            }
+            if (in_svc && !is_blank && ind <= svc_ind) {
+                if (addpg == "1" && !env_done) {
+                    if (env_line > 0) { bad = 1 }
+                    else if (img_line > 0) {
+                        for (i = n; i > img_line; i--) out[i + 2] = out[i]
+                        out[img_line + 1] = sp(img_ind) "environment:"
+                        out[img_line + 2] = sp(img_ind + 2) "- PGDATA=/var/lib/postgresql/data"
+                        n += 2; env_done = 1
+                    }
+                }
+                in_svc = 0
+            }
+            if (in_svc && !is_blank) {
+                if (stripped ~ /^image:/) {
+                    if (stripped ~ /\$/) bad = 1
+                    out[++n] = sp(ind) "image: " newimg
+                    img_done = 1; img_line = n; img_ind = ind
+                    next
+                }
+                if (stripped ~ /^environment:/) {
+                    if (stripped !~ /^environment:[ \t]*$/) bad = 1
+                    env_line = n + 1; env_ind = ind
+                    out[++n] = line
+                    next
+                }
+                if (env_line > 0 && !env_done && addpg == "1" && ind > env_ind) {
+                    if (stripped ~ /^- /) {
+                        out[++n] = sp(ind) "- PGDATA=/var/lib/postgresql/data"
+                    } else {
+                        out[++n] = sp(ind) "PGDATA: /var/lib/postgresql/data"
+                    }
+                    env_done = 1
+                }
+            }
+            out[++n] = line
+        }
+        END {
+            if (in_svc && addpg == "1" && !env_done) {
+                if (env_line > 0) bad = 1
+                else if (img_line > 0) {
+                    out[++n] = sp(img_ind) "environment:"
+                    out[++n] = sp(img_ind + 2) "- PGDATA=/var/lib/postgresql/data"
+                    env_done = 1
+                }
+            }
+            if (!img_done || bad || (addpg == "1" && !env_done)) exit 1
+            for (i = 1; i <= n; i++) print out[i]
+        }
+    ' "$1" > "$2"
+}
+
+_pgu_row_counts() {
+    local c="$1" user="$2" db
+    for db in $(docker exec "$c" psql -U "$user" -d postgres -tAc \
+            "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY 1" 2>/dev/null); do
+        docker exec -i "$c" psql -U "$user" -d "$db" -tA -F ' ' 2>/dev/null <<SQL | sed "s/^/${db}./"
+SELECT format('SELECT %L, count(*) FROM %I.%I', schemaname || '.' || relname, schemaname, relname)
+FROM pg_stat_user_tables ORDER BY schemaname, relname \gexec
+SQL
+    done | sort
+}
+
+_pgu_copy_volume() {
+    docker run --rm --entrypoint sh -v "$1":/from:ro -v "$2":/to "$3" \
+        -c 'cp -a /from/. /to/ && sync' >/dev/null 2>&1
+}
+
+_pgu_wipe_volume() {
+    docker run --rm --entrypoint sh -v "$1":/v "$2" \
+        -c 'find /v -mindepth 1 -maxdepth 1 -exec rm -rf {} +' >/dev/null 2>&1
+}
+
+_pgu_volume_bytes() {
+    docker run --rm --entrypoint sh -v "$1":/v:ro "$2" -c 'du -sk /v | cut -f1' 2>/dev/null \
+        | awk '{print $1 * 1024}'
+}
+
+_pgu_targets() {
+    if [[ "$DB_CONNECTION_TYPE" == "docker" ]] && _panel_configured; then
+        echo "$(t pgu_lbl_panel)|$REMNALABS_ROOT_DIR|remnawave-db"
+    fi
+    if _bot_configured; then
+        local bp svc ai
+        bp=$(get_bot_params "$BOT_BACKUP_SELECTED")
+        svc=$(cut -d'|' -f4 <<< "$bp")
+        [[ -n "$svc" ]] && echo "$(_bot_display_name "$BOT_BACKUP_SELECTED")|$BOT_BACKUP_PATH|$svc"
+        ai=$(get_bot_assistant_params "$BOT_BACKUP_SELECTED" | cut -d'|' -f1)
+        if [[ -n "$ai" ]] && ( cd "$BOT_BACKUP_PATH" 2>/dev/null && docker compose config --services 2>/dev/null | grep -Fxq "$ai" ); then
+            echo "$(t pgu_lbl_ai)|$BOT_BACKUP_PATH|$ai"
+        fi
+    fi
+    return 0
+}
+
+pg_upgrade_menu() {
+    local -a targets=()
+    local line choice i label dir svc c cur
+    while true; do
+        clear
+        echo -e "${GREEN}${BOLD}$(t pgu_title)${RESET}"
+        echo ""
+        echo -e "   ${LIGHT_GRAY}$(t pgu_hint)${RESET}"
+        echo ""
+        targets=()
+        mapfile -t targets < <(_pgu_targets)
+        if [[ ${#targets[@]} -eq 0 ]]; then
+            print_message "INFO" "$(t pgu_none)"
+            echo ""
+            read -rp "$(t press_enter)"
+            return
+        fi
+        ui_menu_reset
+        i=0
+        local -a curs=()
+        for line in "${targets[@]}"; do
+            IFS='|' read -r label dir svc <<< "$line"
+            c=$(_find_service_container "$svc" "$dir" "$svc")
+            cur=$(_pgu_running_major "$c")
+            curs+=("$cur")
+            i=$((i + 1))
+            if [[ -n "$cur" ]]; then
+                ui_menu_add "$i" "$label ${LIGHT_GRAY}· PostgreSQL ${cur}${RESET}"
+            else
+                ui_menu_add "$i" "$label ${YELLOW}· $(t pgu_not_running)${RESET}"
+            fi
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose choice
+        [[ "$choice" == "0" ]] && return
+        [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le ${#targets[@]} ]] || continue
+        IFS='|' read -r label dir svc <<< "${targets[$((choice - 1))]}"
+        cur="${curs[$((choice - 1))]}"
+        echo ""
+        if [[ -z "$cur" ]]; then
+            print_message "ERROR" "$(t pgu_start_first)"
+            echo ""; read -rp "$(t press_enter)"; continue
+        fi
+        if [[ "$cur" -ge "$PG_LATEST_MAJOR" ]]; then
+            print_message "INFO" "$(printf "$(t pgu_latest)" "$cur")"
+            echo ""; read -rp "$(t press_enter)"; continue
+        fi
+        local v target
+        print_message "ACTION" "$(printf "$(t pgu_pick_version)" "$label" "$cur")"
+        ui_menu_reset
+        for ((v = cur + 1; v <= PG_LATEST_MAJOR; v++)); do
+            ui_menu_add "$v" "PostgreSQL $v"
+        done
+        ui_menu_gap
+        ui_menu_add 0 "$(t back)"
+        ui_menu_choose target
+        [[ "$target" =~ ^[0-9]+$ && "$target" -gt "$cur" && "$target" -le "$PG_LATEST_MAJOR" ]] || continue
+        echo ""
+        pg_upgrade_run "$label" "$dir" "$svc" "$target" || true
+        echo ""
+        read -rp "$(t press_enter)"
+    done
+}
+
+pg_upgrade_run() {
+    local label="$1" dir="$2" svc="$3" target="$4"
+    local compose_file cfg old_image new_image vol vol_src mount pgdata_env add_pgdata=0
+    local c user cur ts
+    LOG_CATEGORY="backup"
+    ts=$(date +%Y-%m-%d_%H_%M_%S)
+
+    if ! compose_file=$(_compose_file_in "$dir"); then
+        print_message "ERROR" "$(t rbot_no_yml)"; return 1
+    fi
+    cfg=$(cd "$dir" && docker compose config --format json 2>/dev/null)
+    if [[ -z "$cfg" ]]; then
+        print_message "ERROR" "$(t pgu_bad_compose)"; return 1
+    fi
+    old_image=$(jq -r --arg s "$svc" '.services[$s].image // empty' <<< "$cfg")
+    mapfile -t _pgu_mounts < <(jq -r --arg s "$svc" '
+        .services[$s].volumes // [] | .[] | select((.target // "") | startswith("/var/lib/postgresql"))
+        | "\(.type)|\(.source)|\(.target)"' <<< "$cfg")
+    if [[ ${#_pgu_mounts[@]} -ne 1 || "${_pgu_mounts[0]%%|*}" != "volume" ]]; then
+        print_message "ERROR" "$(t pgu_bad_volume)"; return 1
+    fi
+    IFS='|' read -r _ vol_src mount <<< "${_pgu_mounts[0]}"
+    vol=$(jq -r --arg v "$vol_src" '.volumes[$v].name // $v' <<< "$cfg")
+    pgdata_env=$(jq -r --arg s "$svc" '.services[$s].environment.PGDATA // empty' <<< "$cfg")
+
+    new_image=$(_pgu_new_image "$old_image" "$target")
+    if [[ -z "$new_image" ]]; then
+        print_message "ERROR" "$(printf "$(t pgu_bad_image)" "$old_image")"; return 1
+    fi
+
+    local datadir
+    if [[ -n "$pgdata_env" ]]; then
+        datadir="$pgdata_env"
+    elif [[ "$target" -ge 18 ]]; then
+        datadir="/var/lib/postgresql/${target}/docker"
+    else
+        datadir="/var/lib/postgresql/data"
+    fi
+    if ! _path_within "$datadir" "$mount"; then
+        if [[ "$mount" == "/var/lib/postgresql/data" && -z "$pgdata_env" ]]; then
+            add_pgdata=1
+        else
+            print_message "ERROR" "$(printf "$(t pgu_bad_datadir)" "$datadir" "$mount")"; return 1
+        fi
+    fi
+
+    c=$(_find_service_container "$svc" "$dir" "$svc")
+    user=$(_container_pg_identity "$c" | awk '{print $1}')
+    cur=$(_pgu_running_major "$c")
+    if [[ -z "$cur" ]]; then
+        print_message "ERROR" "$(t pgu_start_first)"; return 1
+    fi
+
+    local new_compose="${compose_file%/*}/.pgupgrade-${ts}.yml"
+    if ! _pgu_edit_compose "$compose_file" "$new_compose" "$svc" "$new_image" "$add_pgdata"; then
+        rm -f "$new_compose"
+        print_message "ERROR" "$(t pgu_cant_edit)"; return 1
+    fi
+    local check
+    check=$(cd "$dir" && docker compose -f "$new_compose" config --format json 2>/dev/null \
+        | jq -r --arg s "$svc" '"\(.services[$s].image)|\(.services[$s].environment.PGDATA // "")"')
+    if [[ "${check%%|*}" != "$new_image" || ( "$add_pgdata" == 1 && "${check#*|}" != "/var/lib/postgresql/data" ) ]]; then
+        rm -f "$new_compose"
+        print_message "ERROR" "$(t pgu_cant_edit)"; return 1
+    fi
+
+    local vol_bytes avail need docker_root
+    vol_bytes=$(_pgu_volume_bytes "$vol" "$old_image")
+    docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null)
+    avail=$(df -B1 --output=avail "${docker_root:-/var/lib/docker}" 2>/dev/null | awk 'NR==2 {print $1+0}')
+    need=$(( ${vol_bytes:-0} * 3 + 200 * 1024 * 1024 ))
+    if [[ -n "$avail" && "$avail" -lt "$need" ]]; then
+        rm -f "$new_compose"
+        print_message "ERROR" "$(printf "$(t bk_no_space)" "$(_ui_human_size "$avail")" "$(_ui_human_size "$need")")"; return 1
+    fi
+
+    print_aligned_rows \
+        "$(t pgu_row_db):" "$label" \
+        "$(t pgu_row_from):" "PostgreSQL ${cur} · ${old_image}" \
+        "$(t pgu_row_to):" "PostgreSQL ${target} · ${new_image}" \
+        "$(t pgu_row_volume):" "${vol} · $(_ui_human_size "${vol_bytes:-0}")" \
+        "$(t pgu_row_old):" "${vol}_pg${cur}_old"
+    [[ "$add_pgdata" == 1 ]] && print_message "INFO" "$(t pgu_add_pgdata)"
+    echo ""
+    print_message "WARN" "$(t pgu_downtime)"
+    local _pgu_ans
+    ui_confirm _pgu_ans "$(t pgu_confirm)"
+    if [[ "$_pgu_ans" != "y" ]]; then
+        rm -f "$new_compose"
+        print_message "INFO" "$(t pgu_cancelled)"; return 1
+    fi
+    echo ""
+
+    print_message "INFO" "$(t pgu_step_backup)"
+    if ! ( create_backup ); then
+        rm -f "$new_compose"
+        print_message "ERROR" "$(t pgu_backup_failed)"; return 1
+    fi
+    echo ""
+    if ! _take_run_lock; then
+        rm -f "$new_compose"
+        print_message "ERROR" "$(t bk_locked)"; return 1
+    fi
+    log_write "INFO" "pg upgrade of $label: $old_image -> $new_image (volume $vol)"
+
+    ui_spin_start "$(printf "$(t pgu_step_pull)" "$new_image")"
+    if ! docker pull -q "$new_image" >/dev/null 2>&1; then
+        ui_spin_stop
+        rm -f "$new_compose"; _release_run_lock
+        print_message "ERROR" "$(printf "$(t pgu_pull_failed)" "$new_image")"; return 1
+    fi
+    print_message "SUCCESS" "$(printf "$(t pgu_pulled)" "$new_image")"
+
+    local -a others=()
+    mapfile -t others < <(cd "$dir" && docker compose config --services 2>/dev/null | grep -Fxv "$svc")
+    ui_spin_start "$(t pgu_step_stop_app)"
+    if [[ ${#others[@]} -gt 0 ]]; then
+        ( cd "$dir" && docker compose stop "${others[@]}" >/dev/null 2>&1 ) || true
+    fi
+    mkdir -p "$PGU_DIR"
+    local dump="$PGU_DIR/${svc}_pg${cur}_${ts}.sql.gz" counts_before="$PGU_DIR/${svc}_${ts}.before"
+    ui_spin_start "$(t pgu_step_dump)"
+    _pgu_row_counts "$c" "$user" > "$counts_before"
+    if ! ( set -o pipefail; docker exec "$c" pg_dumpall -U "$user" | gzip > "$dump" ) \
+        || ! gunzip -c "$dump" | tail -c 2048 | grep -q "dump complete"; then
+        ui_spin_stop
+        rm -f "$new_compose" "$dump"; _release_run_lock
+        ( cd "$dir" && docker compose up -d >/dev/null 2>&1 ) || true
+        print_message "ERROR" "$(t pgu_dump_failed)"; return 1
+    fi
+    print_message "SUCCESS" "$(printf "$(t pgu_dumped)" "$(_ui_human_size "$(stat -c%s "$dump")")")"
+
+    local old_vol="${vol}_pg${cur}_old"
+    docker volume ls -q | grep -Fxq "$old_vol" && old_vol="${old_vol}_${ts}"
+    local compose_bak="${compose_file}.bak-${ts}"
+    ui_spin_start "$(t pgu_step_stop)"
+    ( cd "$dir" && docker compose stop >/dev/null 2>&1 ) || true
+    ui_spin_start "$(t pgu_step_copy)"
+    if ! docker volume create "$old_vol" >/dev/null 2>&1 || ! _pgu_copy_volume "$vol" "$old_vol" "$old_image"; then
+        ui_spin_stop
+        print_message "ERROR" "$(t pgu_copy_failed)"
+        ( cd "$dir" && docker compose up -d >/dev/null 2>&1 ) || true
+        rm -f "$new_compose"; _release_run_lock
+        return 1
+    fi
+    print_message "SUCCESS" "$(printf "$(t pgu_copied)" "$old_vol")"
+
+    _pgu_rollback() {
+        ui_spin_stop
+        print_message "WARN" "$(t pgu_rolling_back)"
+        ( cd "$dir" && docker compose stop >/dev/null 2>&1 ) || true
+        ( cd "$dir" && docker compose rm -f -s "$svc" >/dev/null 2>&1 ) || true
+        [[ -f "$compose_bak" ]] && cp -a "$compose_bak" "$compose_file"
+        _pgu_wipe_volume "$vol" "$old_image" && _pgu_copy_volume "$old_vol" "$vol" "$old_image"
+        if ( cd "$dir" && docker compose up -d >/dev/null 2>&1 ); then
+            print_message "SUCCESS" "$(t pgu_rolled_back)"
+        else
+            print_message "ERROR" "$(printf "$(t pgu_rollback_failed)" "$old_vol" "$compose_bak")"
+        fi
+        send_telegram_message "❌ $(printf "$(t pgu_failed_tg)" "$label" "$cur" "$target")" "None" || true
+        log_write "ERROR" "pg upgrade of $label failed, rolled back"
+        _release_run_lock
+    }
+
+    cp -a "$compose_file" "$compose_bak"
+    ( cd "$dir" && docker compose rm -f -s "$svc" >/dev/null 2>&1 ) || true
+    if ! _pgu_wipe_volume "$vol" "$old_image"; then
+        print_message "ERROR" "$(t pgu_wipe_failed)"; _pgu_rollback; rm -f "$new_compose"; return 1
+    fi
+    cat "$new_compose" > "$compose_file" && rm -f "$new_compose"
+
+    ui_spin_start "$(printf "$(t pgu_step_start)" "$target")"
+    if ! ( cd "$dir" && docker compose up -d "$svc" >/dev/null 2>&1 ); then
+        print_message "ERROR" "$(t pgu_start_failed)"; _pgu_rollback; return 1
+    fi
+    c=$(_find_service_container "$svc" "$dir" "$svc")
+    ui_spin_stop
+    if ! _wait_container_healthy "$c" || [[ "$(_pgu_running_major "$c")" != "$target" ]]; then
+        docker logs --tail 15 "$c" 2>&1 | sed 's/^/   /'
+        print_message "ERROR" "$(t pgu_start_failed)"; _pgu_rollback; return 1
+    fi
+    ui_spin_start "$(t pgu_step_restore)"
+    local rlog="$PGU_DIR/${svc}_${ts}.restore.log"
+    gunzip -c "$dump" | docker exec -i "$c" psql -U "$user" -d postgres -q >/dev/null 2> "$rlog" || true
+    if grep -E '^(psql:.*)?ERROR' "$rlog" | grep -qv 'already exists'; then
+        ui_spin_stop
+        grep -E 'ERROR' "$rlog" | grep -v 'already exists' | head -5 | sed 's/^/   /'
+        print_message "ERROR" "$(t pgu_restore_failed)"; _pgu_rollback; return 1
+    fi
+    docker exec "$c" vacuumdb -U "$user" --all --analyze-only -q >/dev/null 2>&1 || true
+
+    local counts_after="$PGU_DIR/${svc}_${ts}.after"
+    _pgu_row_counts "$c" "$user" > "$counts_after"
+    if ! cmp -s "$counts_before" "$counts_after"; then
+        ui_spin_stop
+        diff "$counts_before" "$counts_after" | head -6 | sed 's/^/   /'
+        print_message "ERROR" "$(t pgu_counts_differ)"; _pgu_rollback; return 1
+    fi
+    print_message "SUCCESS" "$(printf "$(t pgu_counts_ok)" "$(wc -l < "$counts_after")")"
+    ui_spin_start "$(t pgu_step_up)"
+    if ! ( cd "$dir" && docker compose up -d >/dev/null 2>&1 ); then
+        print_message "ERROR" "$(t pgu_start_failed)"; _pgu_rollback; return 1
+    fi
+    ui_spin_stop
+    rm -f "$counts_before" "$counts_after" "$rlog"
+    _release_run_lock
+
+    print_message "SUCCESS" "$(printf "$(t pgu_done)" "$label" "$target")"
+    echo ""
+    print_message "INFO" "$(t pgu_kept_title)"
+    print_aligned_rows \
+        "$(t pgu_kept_volume):" "$old_vol" \
+        "$(t pgu_kept_compose):" "$compose_bak" \
+        "$(t pgu_kept_dump):" "$dump"
+    echo -e "   ${LIGHT_GRAY}$(printf "$(t pgu_cleanup_hint)" "$old_vol" "$compose_bak" "$dump")${RESET}"
+    log_write "INFO" "pg upgrade of $label to $target done"
+    send_telegram_message "✅ $(printf "$(t pgu_done_tg)" "$label" "$cur" "$target")" "None" || true
+    return 0
+}
+
 menu_what_to_backup() {
     local choice mode panel_val bot_val
     while true; do
@@ -5934,6 +6458,8 @@ menu_what_to_backup() {
         ui_menu_add 3 "$(t wb_menu_extra)"
         ui_menu_add 4 "$(t wb_menu_mode)"
         ui_menu_gap
+        ui_menu_add 5 "$(t wb_menu_pgu)"
+        ui_menu_gap
         ui_menu_add 0 "$(t back)"
         ui_menu_choose choice
         case $choice in
@@ -5941,6 +6467,7 @@ menu_what_to_backup() {
             2) settings_bot ;;
             3) settings_extra ;;
             4) backup_mode_menu ;;
+            5) pg_upgrade_menu ;;
             0) return ;;
         esac
     done
