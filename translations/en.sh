@@ -358,6 +358,7 @@ L[tg_auto_updated]="Script auto-updated from"
 L[tg_auto_updated_to]="to"
 L[tg_auto_update_changelog]="📋 What's new?"
 L[tg_donate_btn]="☕ Support the author"
+L[tg_star_btn]="⭐ Star on GitHub"
 
 # ===== Restore =====
 L[rs_title]="Restore from Backup"

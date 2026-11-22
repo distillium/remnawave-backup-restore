@@ -358,6 +358,7 @@ L[tg_auto_updated]="Автообновление скрипта с"
 L[tg_auto_updated_to]="до"
 L[tg_auto_update_changelog]="📋 Что нового?"
 L[tg_donate_btn]="☕ Отблагодарить автора"
+L[tg_star_btn]="⭐ Поставить звезду на GitHub"
 
 # ===== Восстановление =====
 L[rs_title]="Восстановление из бэкапа"
