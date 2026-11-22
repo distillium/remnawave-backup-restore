@@ -5,9 +5,10 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.5.0"
+VERSION="4.5.1"
 PG_LATEST_MAJOR=19
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
+GITHUB_URL="https://github.com/distillium/remnawave-backup-restore"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 LOG_DIR="$INSTALL_DIR/logs"
@@ -1813,7 +1814,8 @@ restore_panel_db_dump() {
 }
 
 donate_keyboard() {
-    printf '{"inline_keyboard":[[{"text":"%s","url":"%s"}]]}' "$(t tg_donate_btn)" "$DONATE_URL"
+    printf '{"inline_keyboard":[[{"text":"%s","url":"%s"}],[{"text":"%s","url":"%s"}]]}' \
+        "$(t tg_donate_btn)" "$DONATE_URL" "$(t tg_star_btn)" "$GITHUB_URL"
 }
 
 _TG_PROXY_STATE="${TMPDIR:-/tmp}/rwb_tgproxy_$$"
@@ -3751,7 +3753,7 @@ METAEOF
                             done
                             
                             local auto_update_msg="✅ *$(t tg_auto_updated)* ${CURRENT_VERSION} *$(t tg_auto_updated_to)* ${REMOTE_VERSION_LATEST}"
-                            local release_url="https://github.com/distillium/remnawave-backup-restore/releases/tag/${REMOTE_VERSION_LATEST}"
+                            local release_url="${GITHUB_URL}/releases/tag/${REMOTE_VERSION_LATEST}"
                             local keyboard="{\"inline_keyboard\":[[{\"text\":\"$(t tg_auto_update_changelog)\",\"url\":\"${release_url}\"}]]}"
 
                             _tg_curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
