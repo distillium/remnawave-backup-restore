@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 export REQUESTS_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-VERSION="4.5.1"
+VERSION="4.5.2"
 PG_LATEST_MAJOR=19
 DONATE_URL="https://t.me/tribute/app?startapp=dRNM"
 GITHUB_URL="https://github.com/distillium/remnawave-backup-restore"
@@ -5978,12 +5978,35 @@ restore_extra_files() {
 
 PGU_DIR="$INSTALL_DIR/pg-upgrade"
 
+_pgu_prepare_compose() {
+    _pgu_edit_compose "$compose_file" "$new_compose" "$svc" "$new_image" "$move_mount" "$drop_pgdata" || return 1
+    local check chk_img chk_pgdata chk_mount
+    check=$(cd "$dir" && docker compose -f "$new_compose" "${ovr_args[@]}" config --format json 2>/dev/null \
+        | jq -r --arg s "$svc" --arg v "$vol_src" '"\(.services[$s].image)|\(.services[$s].environment.PGDATA // "")|\([.services[$s].volumes // [] | .[] | select(.source == $v) | .target] | join(","))"')
+    IFS='|' read -r chk_img chk_pgdata chk_mount <<< "$check"
+    [[ "$chk_img" == "$new_image" ]] || return 1
+    if [[ "$move_mount" == 1 ]]; then
+        [[ "$chk_mount" == "/var/lib/postgresql" && -z "$chk_pgdata" ]] || return 1
+    else
+        [[ "$chk_mount" == "$mount" && "$chk_pgdata" == "$pgdata_env" ]] || return 1
+    fi
+    return 0
+}
+
 _compose_file_in() {
     local f
-    for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+    for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
         [[ -f "$1/$f" ]] && { echo "$1/$f"; return 0; }
     done
     return 1
+}
+
+_compose_overrides_in() {
+    local f
+    for f in compose.override.yaml compose.override.yml docker-compose.override.yaml docker-compose.override.yml; do
+        [[ -f "$1/$f" ]] && echo "$1/$f"
+    done
+    return 0
 }
 
 _pgu_running_major() {
@@ -6021,65 +6044,54 @@ _pgu_new_image() {
 }
 
 _pgu_edit_compose() {
-    awk -v svc="$3" -v newimg="$4" -v addpg="$5" '
+    awk -v svc="$3" -v newimg="$4" -v mvmount="${5:-0}" -v droppg="${6:-0}" '
         function indent(s) { match(s, /^ */); return RLENGTH }
         function sp(k,   r) { r = ""; while (k-- > 0) r = r " "; return r }
-        BEGIN { in_svc = 0; img_done = 0; env_done = 0; env_line = 0; bad = 0; n = 0 }
+        BEGIN { in_services = 0; child_ind = -1; in_svc = 0; img_done = 0; env_ind = 0; bad = 0; n = 0; mv_done = 0; env_open = 0; pg_dropped = 0 }
         {
             line = $0
             stripped = line; sub(/^ +/, "", stripped)
             ind = indent(line)
             is_blank = (stripped == "" || substr(stripped, 1, 1) == "#")
 
-            if (!in_svc && stripped ~ ("^" svc ":[ \t]*$") && ind > 0) {
+            if (!is_blank && ind == 0) { in_services = (stripped ~ /^services:[ \t]*$/); child_ind = -1 }
+            else if (in_services && !is_blank && child_ind < 0) child_ind = ind
+            if (in_svc && !is_blank && ind <= svc_ind) in_svc = 0
+            if (!in_svc && in_services && !is_blank && ind == child_ind && stripped ~ ("^[\"\x27]?" svc "[\"\x27]?:[ \t]*$")) {
                 in_svc = 1; svc_ind = ind; out[++n] = line; next
             }
-            if (in_svc && !is_blank && ind <= svc_ind) {
-                if (addpg == "1" && !env_done) {
-                    if (env_line > 0) { bad = 1 }
-                    else if (img_line > 0) {
-                        for (i = n; i > img_line; i--) out[i + 2] = out[i]
-                        out[img_line + 1] = sp(img_ind) "environment:"
-                        out[img_line + 2] = sp(img_ind + 2) "- PGDATA=/var/lib/postgresql/data"
-                        n += 2; env_done = 1
-                    }
-                }
-                in_svc = 0
+            if (in_svc && !is_blank && env_open && ind <= env_ind) env_open = 0
+            if (in_svc && !is_blank && env_open && droppg == "1" \
+                && stripped ~ /^(- *["'"'"']?PGDATA=|["'"'"']?PGDATA["'"'"']?:)/) {
+                pg_dropped++
+                next
+            }
+            if (in_svc && !is_blank && mvmount == "1" \
+                && (line ~ /:\/var\/lib\/postgresql\/data(["'"'"':]|[ \t]*$|[ \t]+#)/ \
+                    || line ~ /target:[ \t]*["'"'"']?\/var\/lib\/postgresql\/data(["'"'"']|[ \t]*$|[ \t]+#)/)) {
+                sub(/\/var\/lib\/postgresql\/data/, "/var/lib/postgresql", line)
+                mv_done++
+                out[++n] = line
+                next
             }
             if (in_svc && !is_blank) {
                 if (stripped ~ /^image:/) {
                     if (stripped ~ /\$/) bad = 1
                     out[++n] = sp(ind) "image: " newimg
-                    img_done = 1; img_line = n; img_ind = ind
+                    img_done = 1
                     next
                 }
                 if (stripped ~ /^environment:/) {
-                    if (stripped !~ /^environment:[ \t]*$/) bad = 1
-                    env_line = n + 1; env_ind = ind
+                    if (droppg == "1" && stripped !~ /^environment:[ \t]*$/) bad = 1
+                    env_ind = ind; env_open = 1
                     out[++n] = line
                     next
-                }
-                if (env_line > 0 && !env_done && addpg == "1" && ind > env_ind) {
-                    if (stripped ~ /^- /) {
-                        out[++n] = sp(ind) "- PGDATA=/var/lib/postgresql/data"
-                    } else {
-                        out[++n] = sp(ind) "PGDATA: /var/lib/postgresql/data"
-                    }
-                    env_done = 1
                 }
             }
             out[++n] = line
         }
         END {
-            if (in_svc && addpg == "1" && !env_done) {
-                if (env_line > 0) bad = 1
-                else if (img_line > 0) {
-                    out[++n] = sp(img_ind) "environment:"
-                    out[++n] = sp(img_ind + 2) "- PGDATA=/var/lib/postgresql/data"
-                    env_done = 1
-                }
-            }
-            if (!img_done || bad || (addpg == "1" && !env_done)) exit 1
+            if (!img_done || bad || (mvmount == "1" && mv_done != 1) || (droppg == "1" && pg_dropped != 1)) exit 1
             for (i = 1; i <= n; i++) print out[i]
         }
     ' "$1" > "$2"
@@ -6195,7 +6207,7 @@ pg_upgrade_menu() {
 
 pg_upgrade_run() {
     local label="$1" dir="$2" svc="$3" target="$4"
-    local compose_file cfg old_image new_image vol vol_src mount pgdata_env add_pgdata=0
+    local compose_file cfg old_image new_image vol vol_src mount pgdata_env
     local c user cur ts
     LOG_CATEGORY="backup"
     ts=$(date +%Y-%m-%d_%H_%M_%S)
@@ -6223,18 +6235,20 @@ pg_upgrade_run() {
         print_message "ERROR" "$(printf "$(t pgu_bad_image)" "$old_image")"; return 1
     fi
 
-    local datadir
-    if [[ -n "$pgdata_env" ]]; then
-        datadir="$pgdata_env"
-    elif [[ "$target" -ge 18 ]]; then
-        datadir="/var/lib/postgresql/${target}/docker"
+    local datadir move_mount=0 drop_pgdata=0
+    if [[ "$target" -ge 18 && "$mount" == "/var/lib/postgresql/data" \
+        && ( -z "$pgdata_env" || "$pgdata_env" == "/var/lib/postgresql/data" ) ]]; then
+        move_mount=1
+        [[ -n "$pgdata_env" ]] && drop_pgdata=1
     else
-        datadir="/var/lib/postgresql/data"
-    fi
-    if ! _path_within "$datadir" "$mount"; then
-        if [[ "$mount" == "/var/lib/postgresql/data" && -z "$pgdata_env" ]]; then
-            add_pgdata=1
+        if [[ -n "$pgdata_env" ]]; then
+            datadir="$pgdata_env"
+        elif [[ "$target" -ge 18 ]]; then
+            datadir="/var/lib/postgresql/${target}/docker"
         else
+            datadir="/var/lib/postgresql/data"
+        fi
+        if ! _path_within "$datadir" "$mount"; then
             print_message "ERROR" "$(printf "$(t pgu_bad_datadir)" "$datadir" "$mount")"; return 1
         fi
     fi
@@ -6246,17 +6260,25 @@ pg_upgrade_run() {
         print_message "ERROR" "$(t pgu_start_first)"; return 1
     fi
 
-    local new_compose="${compose_file%/*}/.pgupgrade-${ts}.yml"
-    if ! _pgu_edit_compose "$compose_file" "$new_compose" "$svc" "$new_image" "$add_pgdata"; then
-        rm -f "$new_compose"
+    local used_files
+    used_files=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$c" 2>/dev/null)
+    if [[ -n "$used_files" && "$(realpath -m "${used_files%%,*}")" != "$(realpath -m "$compose_file")" ]]; then
         print_message "ERROR" "$(t pgu_cant_edit)"; return 1
     fi
-    local check
-    check=$(cd "$dir" && docker compose -f "$new_compose" config --format json 2>/dev/null \
-        | jq -r --arg s "$svc" '"\(.services[$s].image)|\(.services[$s].environment.PGDATA // "")"')
-    if [[ "${check%%|*}" != "$new_image" || ( "$add_pgdata" == 1 && "${check#*|}" != "/var/lib/postgresql/data" ) ]]; then
-        rm -f "$new_compose"
-        print_message "ERROR" "$(t pgu_cant_edit)"; return 1
+    local -a ovr_args=()
+    local ovr
+    while IFS= read -r ovr; do
+        [[ -n "$ovr" ]] && ovr_args+=(-f "$ovr")
+    done < <(_compose_overrides_in "$dir")
+
+    local new_compose="${compose_file%/*}/.pgupgrade-${ts}.yml"
+    if ! _pgu_prepare_compose; then
+        if [[ "$drop_pgdata" == 1 ]]; then
+            move_mount=0; drop_pgdata=0
+            _pgu_prepare_compose || { rm -f "$new_compose"; print_message "ERROR" "$(t pgu_cant_edit)"; return 1; }
+        else
+            rm -f "$new_compose"; print_message "ERROR" "$(t pgu_cant_edit)"; return 1
+        fi
     fi
 
     local vol_bytes avail need docker_root
@@ -6275,7 +6297,7 @@ pg_upgrade_run() {
         "$(t pgu_row_to):" "PostgreSQL ${target} · ${new_image}" \
         "$(t pgu_row_volume):" "${vol} · $(_ui_human_size "${vol_bytes:-0}")" \
         "$(t pgu_row_old):" "${vol}_pg${cur}_old"
-    [[ "$add_pgdata" == 1 ]] && print_message "INFO" "$(t pgu_add_pgdata)"
+    [[ "$move_mount" == 1 ]] && print_message "INFO" "$(t pgu_move_mount)"
     echo ""
     print_message "WARN" "$(t pgu_downtime)"
     local _pgu_ans
